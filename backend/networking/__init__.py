@@ -1,39 +1,23 @@
 """
-WireGuard Networking Package
+Networking module for WireGuard and P2P infrastructure
 
-Provides WireGuard connectivity management for P2P swarm nodes.
-Includes connection initialization, health monitoring, and hub management.
+This module contains networking-related components for the OpenClaw P2P swarm.
 """
 
-from backend.networking.wireguard_node_connector import (
-    WireGuardNodeConnector,
-    WireGuardNodeConnectorError,
-    ConfigValidationError,
-    ConnectionError,
-    ConnectionTimeout,
-    ping_host
-)
-
-from backend.networking.wireguard_hub_manager import (
-    WireGuardHubManager,
-    PeerConfig,
-    WireGuardError,
-    ConfigReloadError,
-    PeerNotFoundError,
-    ConnectivityCheckError,
+from backend.networking.wireguard_config import (
+    WireGuardConfig,
+    WireGuardInterface,
+    WireGuardPeer,
+    IPAddressAllocator,
+    generate_wireguard_keypair,
+    generate_node_config,
 )
 
 __all__ = [
-    "WireGuardNodeConnector",
-    "WireGuardNodeConnectorError",
-    "ConfigValidationError",
-    "ConnectionError",
-    "ConnectionTimeout",
-    "ping_host",
-    "WireGuardHubManager",
-    "PeerConfig",
-    "WireGuardError",
-    "ConfigReloadError",
-    "PeerNotFoundError",
-    "ConnectivityCheckError",
+    "WireGuardConfig",
+    "WireGuardInterface",
+    "WireGuardPeer",
+    "IPAddressAllocator",
+    "generate_wireguard_keypair",
+    "generate_node_config",
 ]
