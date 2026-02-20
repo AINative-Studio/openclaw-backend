@@ -1,22 +1,25 @@
-"""
-P2P networking module for OpenCLAW Agent Swarm.
+"""P2P communication module for OpenClaw."""
 
-This module provides libp2p integration for peer-to-peer communication,
-including bootstrap node connectivity and DHT-based peer discovery.
-"""
-
-from .libp2p_bootstrap import (
-    LibP2PBootstrapClient,
-    BootstrapConnectionError,
-    BootstrapResult,
-    PeerInfo,
-    DHTStatus,
+from .noise_protocol import (
+    NoiseProtocol,
+    NoisePattern,
+    SessionState,
+    HandshakeError,
+    IdentityVerificationError,
+    SessionNotEstablishedError,
+    DecryptionError,
+    ReplayAttackError,
+    MessageOrderError
 )
 
 __all__ = [
-    'LibP2PBootstrapClient',
-    'BootstrapConnectionError',
-    'BootstrapResult',
-    'PeerInfo',
-    'DHTStatus',
+    'NoiseProtocol',
+    'NoisePattern',
+    'SessionState',
+    'HandshakeError',
+    'IdentityVerificationError',
+    'SessionNotEstablishedError',
+    'DecryptionError',
+    'ReplayAttackError',
+    'MessageOrderError'
 ]
