@@ -19,7 +19,6 @@ from sqlalchemy import (
     Integer,
     Enum as SQLEnum,
 )
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 
 from backend.db.base_class import Base
@@ -53,17 +52,17 @@ class AgentSwarmInstance(Base):
     __tablename__ = "agent_swarm_instances"
     __table_args__ = {"extend_existing": True}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name = Column(String(255), nullable=False, index=True)
     persona = Column(Text, nullable=True)
     model = Column(String(255), nullable=False)
-    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id = Column(String(36), nullable=False, index=True)
 
     status = Column(
         SQLEnum(
             AgentSwarmStatus,
             name="agent_swarm_status",
-            native_enum=True,
+            native_enum=False,
             create_constraint=True,
             values_callable=lambda x: [e.value for e in x],
         ),
@@ -80,13 +79,13 @@ class AgentSwarmInstance(Base):
         SQLEnum(
             HeartbeatInterval,
             name="heartbeat_interval",
-            native_enum=True,
+            native_enum=False,
             create_constraint=True,
             values_callable=lambda x: [e.value for e in x],
         ),
         nullable=True,
     )
-    heartbeat_checklist = Column(ARRAY(String), nullable=True)
+    heartbeat_checklist = Column(JSON, nullable=True)
 
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
     next_heartbeat_at = Column(DateTime(timezone=True), nullable=True)

@@ -25,6 +25,14 @@ test_*.db
 *.swo
 *~
 
+# Database
+openclaw.db
+
+# Environment (keep .example files)
+.env
+.env.*
+!.env.*.example
+
 # OS
 .DS_Store
 Thumbs.db

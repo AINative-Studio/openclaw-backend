@@ -76,7 +76,7 @@ class AgentLifecycleApiService:
             heartbeat_checklist = request.heartbeat.checklist
 
         agent = AgentSwarmInstance(
-            id=uuid4(),
+            id=str(uuid4()),
             name=request.name,
             persona=request.persona,
             model=request.model,

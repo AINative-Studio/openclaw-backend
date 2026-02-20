@@ -20,6 +20,18 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+from contextlib import contextmanager
+
+try:
+    from backend.services.datadog_service import get_datadog_service
+except ImportError:
+    get_datadog_service = None  # type: ignore[assignment]
+
+
+@contextmanager
+def _noop_ctx():
+    yield
+
 
 class CommandType(Enum):
     """Types of commands supported by the orchestrator"""
@@ -313,17 +325,25 @@ EXAMPLES:
 
 Return ONLY valid JSON, no other text."""
 
+        dd = get_datadog_service() if get_datadog_service else None
         try:
-            response = self.client.messages.create(
-                model=self.llm_model,
-                max_tokens=200,
-                system=system_prompt,
-                messages=[{"role": "user", "content": command}]
-            )
+            with (dd.workflow_span("command_parse_llm") if dd else _noop_ctx()):
+                response = self.client.messages.create(
+                    model=self.llm_model,
+                    max_tokens=200,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": command}]
+                )
 
             # Parse JSON response
             result = json.loads(response.content[0].text)
             logger.info(f"LLM parsed command: {result}")
+
+            if dd:
+                dd.annotate_span(
+                    input_data=command,
+                    output_data=json.dumps(result),
+                )
 
             # Handle non-commands
             if result.get("command_type") == "not_a_command":

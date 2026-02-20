@@ -1,0 +1,197 @@
+{
+    "title": "AgentClaw Observability Dashboard",
+    "description": "Real-time monitoring for AgentClaw AI agent swarm: LLM performance, task lifecycle, lease management, and system health.",
+    "layout_type": "ordered",
+    "widgets": [
+        {
+            "definition": {
+                "title": "LLM Request Latency (P95)",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "p95:trace.anthropic.request.duration{service:agentclaw-backend}",
+                        "display_type": "line",
+                        "style": {
+                            "palette": "dog_classic",
+                            "line_type": "solid",
+                            "line_width": "normal"
+                        }
+                    }
+                ],
+                "yaxis": {
+                    "label": "seconds"
+                }
+            }
+        },
+        {
+            "definition": {
+                "title": "LLM Token Usage",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "sum:trace.anthropic.request.tokens.input{service:agentclaw-backend}.as_count()",
+                        "display_type": "bars",
+                        "style": {
+                            "palette": "cool"
+                        }
+                    },
+                    {
+                        "q": "sum:trace.anthropic.request.tokens.output{service:agentclaw-backend}.as_count()",
+                        "display_type": "bars",
+                        "style": {
+                            "palette": "warm"
+                        }
+                    }
+                ],
+                "yaxis": {
+                    "label": "tokens"
+                }
+            }
+        },
+        {
+            "definition": {
+                "title": "Task Assignments by Status",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "sum:agentclaw.task_assignments_total{*} by {status}.as_count()",
+                        "display_type": "bars",
+                        "style": {
+                            "palette": "semantic"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "definition": {
+                "title": "Lease Lifecycle (Issued vs Expired)",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "sum:agentclaw.leases_issued_total{*}.as_count()",
+                        "display_type": "line",
+                        "style": {
+                            "palette": "green"
+                        }
+                    },
+                    {
+                        "q": "sum:agentclaw.leases_expired_total{*}.as_count()",
+                        "display_type": "line",
+                        "style": {
+                            "palette": "orange"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "definition": {
+                "title": "Active Leases",
+                "type": "query_value",
+                "requests": [
+                    {
+                        "q": "avg:agentclaw.active_leases{*}",
+                        "aggregator": "last"
+                    }
+                ],
+                "precision": 0
+            }
+        },
+        {
+            "definition": {
+                "title": "Node Crashes",
+                "type": "query_value",
+                "requests": [
+                    {
+                        "q": "sum:agentclaw.node_crashes_total{*}.as_count()",
+                        "aggregator": "sum"
+                    }
+                ],
+                "precision": 0,
+                "custom_links": []
+            }
+        },
+        {
+            "definition": {
+                "title": "Buffer Utilization (%)",
+                "type": "query_value",
+                "requests": [
+                    {
+                        "q": "avg:agentclaw.buffer_utilization_percent{*}",
+                        "aggregator": "last",
+                        "conditional_formats": [
+                            {
+                                "comparator": ">=",
+                                "value": 80,
+                                "palette": "white_on_red"
+                            },
+                            {
+                                "comparator": ">=",
+                                "value": 50,
+                                "palette": "white_on_yellow"
+                            },
+                            {
+                                "comparator": "<",
+                                "value": 50,
+                                "palette": "white_on_green"
+                            }
+                        ]
+                    }
+                ],
+                "precision": 1
+            }
+        },
+        {
+            "definition": {
+                "title": "Recovery Duration (P95)",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "p95:agentclaw.recovery_duration_seconds{*} by {type}",
+                        "display_type": "line",
+                        "style": {
+                            "palette": "dog_classic"
+                        }
+                    }
+                ],
+                "yaxis": {
+                    "label": "seconds"
+                }
+            }
+        },
+        {
+            "definition": {
+                "title": "FastAPI Request Latency by Endpoint",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "p95:trace.fastapi.request.duration{service:agentclaw-backend} by {resource_name}",
+                        "display_type": "line",
+                        "style": {
+                            "palette": "dog_classic"
+                        }
+                    }
+                ],
+                "yaxis": {
+                    "label": "seconds"
+                }
+            }
+        },
+        {
+            "definition": {
+                "title": "API Error Rate by Endpoint",
+                "type": "timeseries",
+                "requests": [
+                    {
+                        "q": "sum:trace.fastapi.request.errors{service:agentclaw-backend} by {resource_name}.as_count()",
+                        "display_type": "bars",
+                        "style": {
+                            "palette": "warm"
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}

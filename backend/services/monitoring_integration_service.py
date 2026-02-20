@@ -43,6 +43,11 @@ except (ImportError, ModuleNotFoundError):
     SwarmHealthService = None  # type: ignore[assignment,misc]
     get_swarm_health_service = None  # type: ignore[assignment]
 
+try:
+    from backend.services.datadog_service import get_datadog_service
+except (ImportError, ModuleNotFoundError):
+    get_datadog_service = None  # type: ignore[assignment]
+
 
 class MonitoringIntegrationService:
     """Unified facade combining all monitoring subsystems."""
@@ -53,6 +58,7 @@ class MonitoringIntegrationService:
         self._metrics_service: Optional[Any] = None
         self._timeline_service: Optional[Any] = None
         self._health_service: Optional[Any] = None
+        self._datadog_service: Optional[Any] = None
         self._event_types: Optional[Any] = None
         self._initialize_services()
 
@@ -84,6 +90,15 @@ class MonitoringIntegrationService:
         except Exception as e:
             logger.warning(f"SwarmHealthService unavailable: {e}")
             self._health_service = None
+
+        try:
+            if get_datadog_service is not None:
+                self._datadog_service = get_datadog_service()
+            else:
+                raise ImportError("get_datadog_service not available")
+        except Exception as e:
+            logger.warning(f"DatadogService unavailable: {e}")
+            self._datadog_service = None
 
         self._event_types = TimelineEventType
 
@@ -269,6 +284,12 @@ class MonitoringIntegrationService:
         except Exception as e:
             logger.debug(f"Metrics error in on_task_leased: {e}")
 
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_lease_issued(complexity)
+        except Exception as e:
+            logger.debug(f"Datadog error in on_task_leased: {e}")
+
     def on_task_requeued(
         self,
         task_id: str,
@@ -290,6 +311,12 @@ class MonitoringIntegrationService:
                 self._metrics_service.record_task_requeued(result)
         except Exception as e:
             logger.debug(f"Metrics error in on_task_requeued: {e}")
+
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_task_requeued(result)
+        except Exception as e:
+            logger.debug(f"Datadog error in on_task_requeued: {e}")
 
     def on_lease_expired(
         self,
@@ -313,6 +340,12 @@ class MonitoringIntegrationService:
                 self._metrics_service.record_lease_expired()
         except Exception as e:
             logger.debug(f"Metrics error in on_lease_expired: {e}")
+
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_lease_expired()
+        except Exception as e:
+            logger.debug(f"Datadog error in on_lease_expired: {e}")
 
     def on_lease_revoked(
         self,
@@ -338,6 +371,12 @@ class MonitoringIntegrationService:
         except Exception as e:
             logger.debug(f"Metrics error in on_lease_revoked: {e}")
 
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_lease_revoked(reason)
+        except Exception as e:
+            logger.debug(f"Datadog error in on_lease_revoked: {e}")
+
     def on_node_crashed(
         self,
         peer_id: str,
@@ -359,6 +398,12 @@ class MonitoringIntegrationService:
         except Exception as e:
             logger.debug(f"Metrics error in on_node_crashed: {e}")
 
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_node_crash()
+        except Exception as e:
+            logger.debug(f"Datadog error in on_node_crashed: {e}")
+
     # ------------------------------------------------------------------
     # Metrics-only facade methods
     # ------------------------------------------------------------------
@@ -374,6 +419,12 @@ class MonitoringIntegrationService:
                 self._metrics_service.record_task_assignment(status)
         except Exception as e:
             logger.debug(f"Metrics error in on_task_assigned: {e}")
+
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_task_assignment(status)
+        except Exception as e:
+            logger.debug(f"Datadog error in on_task_assigned: {e}")
 
     def on_partition_event(self, event_type: str) -> None:
         try:
@@ -424,6 +475,18 @@ class MonitoringIntegrationService:
                 f"Metrics error in on_recovery_completed (duration): {e}"
             )
 
+        try:
+            if self._datadog_service is not None:
+                self._datadog_service.record_recovery_operation(
+                    recovery_type, status
+                )
+                if duration_seconds is not None:
+                    self._datadog_service.record_recovery_duration(
+                        recovery_type, duration_seconds
+                    )
+        except Exception as e:
+            logger.debug(f"Datadog error in on_recovery_completed: {e}")
+
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
@@ -433,6 +496,7 @@ class MonitoringIntegrationService:
         metrics_available = self._metrics_service is not None
         timeline_available = self._timeline_service is not None
         health_available = self._health_service is not None
+        datadog_available = self._datadog_service is not None
 
         available_count = sum(
             [metrics_available, timeline_available, health_available]
@@ -468,6 +532,7 @@ class MonitoringIntegrationService:
                 "metrics": {"available": metrics_available},
                 "timeline": {"available": timeline_available},
                 "health": {"available": health_available},
+                "datadog": {"available": datadog_available},
             },
             "registered_health_subsystems": registered_count,
             "timeline_event_count": timeline_event_count,

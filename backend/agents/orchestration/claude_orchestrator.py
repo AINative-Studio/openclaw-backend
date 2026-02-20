@@ -25,11 +25,23 @@ from enum import Enum
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 
+from contextlib import contextmanager
+
 from app.agents.orchestration.command_parser import CommandParser, CommandType, CommandParseError
 from app.agents.orchestration.notification_service import NotificationService
 from app.agents.swarm.nouscoder_agent_spawner import NousCoderAgentSpawner, AgentLifecycleState
 
 logger = logging.getLogger(__name__)
+
+try:
+    from backend.services.datadog_service import get_datadog_service
+except ImportError:
+    get_datadog_service = None  # type: ignore[assignment]
+
+
+@contextmanager
+def _noop_ctx():
+    yield
 
 
 class WorkflowState(Enum):
@@ -150,6 +162,12 @@ class ClaudeOrchestrator:
         Returns:
             Result dictionary with status and details
         """
+        dd = get_datadog_service() if get_datadog_service else None
+        with (dd.agent_span("claude_orchestrator") if dd else _noop_ctx()):
+            return await self._handle_whatsapp_command_inner(command)
+
+    async def _handle_whatsapp_command_inner(self, command: str) -> Dict[str, Any]:
+        """Inner implementation of handle_whatsapp_command wrapped by agent span."""
         try:
             # Parse command
             parsed = self.command_parser.parse(command)
