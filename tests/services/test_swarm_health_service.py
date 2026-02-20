@@ -507,3 +507,146 @@ class TestSingletonFactory:
 
         # Cleanup
         mod._swarm_health_service_instance = None
+
+
+class TestHealthStatusDerivationWithCustomThresholds:
+    """Test health status derivation with custom alert thresholds"""
+
+    @pytest.fixture(autouse=True)
+    def reset_threshold_singleton(self):
+        """Reset alert threshold singleton for test isolation"""
+        import backend.services.alert_threshold_service as threshold_mod
+        threshold_mod._alert_threshold_service_instance = None
+        yield
+        threshold_mod._alert_threshold_service_instance = None
+
+    @pytest.fixture
+    def swarm_health_service(self):
+        """Create fresh SwarmHealthService instance"""
+        return SwarmHealthService()
+
+    def test_custom_buffer_threshold_healthy_at_default_degraded_value(
+        self, swarm_health_service
+    ):
+        """
+        GIVEN buffer threshold raised to 90%
+        WHEN buffer utilization is 85% (above default 80%)
+        THEN status should be healthy (below custom threshold)
+        """
+        from backend.services.alert_threshold_service import (
+            get_alert_threshold_service,
+        )
+        get_alert_threshold_service().update_thresholds(
+            {"buffer_utilization": 90.0}
+        )
+
+        results = {
+            "partition_detection": {"available": True, "current_state": "normal"},
+            "result_buffer": {"available": True, "utilization_percent": 85.0},
+        }
+        status = swarm_health_service._derive_health_status(results, 2)
+
+        assert status == "healthy"
+
+    def test_custom_buffer_threshold_degraded_above_new_threshold(
+        self, swarm_health_service
+    ):
+        """
+        GIVEN buffer threshold lowered to 70%
+        WHEN buffer utilization is 75% (below default 80%)
+        THEN status should be degraded (above custom threshold)
+        """
+        from backend.services.alert_threshold_service import (
+            get_alert_threshold_service,
+        )
+        get_alert_threshold_service().update_thresholds(
+            {"buffer_utilization": 70.0}
+        )
+
+        results = {
+            "partition_detection": {"available": True, "current_state": "normal"},
+            "result_buffer": {"available": True, "utilization_percent": 75.0},
+        }
+        status = swarm_health_service._derive_health_status(results, 2)
+
+        assert status == "degraded"
+
+    def test_custom_crash_count_threshold(self, swarm_health_service):
+        """
+        GIVEN crash count threshold raised to 5
+        WHEN recent_crashes is 3 (at default threshold)
+        THEN status should be healthy (below custom threshold)
+        """
+        from backend.services.alert_threshold_service import (
+            get_alert_threshold_service,
+        )
+        get_alert_threshold_service().update_thresholds({"crash_count": 5})
+
+        results = {
+            "partition_detection": {"available": True, "current_state": "normal"},
+            "node_crash_detection": {"available": True, "recent_crashes": 3},
+        }
+        status = swarm_health_service._derive_health_status(results, 2)
+
+        assert status == "healthy"
+
+    def test_custom_revocation_rate_threshold(self, swarm_health_service):
+        """
+        GIVEN revocation rate threshold lowered to 30%
+        WHEN revocation rate is 40% (below default 50%)
+        THEN status should be degraded (above custom threshold)
+        """
+        from backend.services.alert_threshold_service import (
+            get_alert_threshold_service,
+        )
+        get_alert_threshold_service().update_thresholds(
+            {"revocation_rate": 30.0}
+        )
+
+        results = {
+            "partition_detection": {"available": True, "current_state": "normal"},
+            "lease_revocation": {"available": True, "revocation_rate": 40.0},
+        }
+        status = swarm_health_service._derive_health_status(results, 2)
+
+        assert status == "degraded"
+
+    def test_custom_ip_pool_threshold(self, swarm_health_service):
+        """
+        GIVEN IP pool threshold raised to 95%
+        WHEN IP pool utilization is 92% (above default 90%)
+        THEN status should be healthy (below custom threshold)
+        """
+        from backend.services.alert_threshold_service import (
+            get_alert_threshold_service,
+        )
+        get_alert_threshold_service().update_thresholds(
+            {"ip_pool_utilization": 95.0}
+        )
+
+        results = {
+            "partition_detection": {"available": True, "current_state": "normal"},
+            "ip_pool": {"available": True, "utilization_percent": 92},
+        }
+        status = swarm_health_service._derive_health_status(results, 2)
+
+        assert status == "healthy"
+
+    def test_default_thresholds_preserve_existing_behavior(
+        self, swarm_health_service
+    ):
+        """
+        GIVEN default thresholds (unchanged)
+        WHEN all metrics are at exact boundary values
+        THEN status should be healthy (boundary is not exceeded)
+        """
+        results = {
+            "partition_detection": {"available": True, "current_state": "normal"},
+            "result_buffer": {"available": True, "utilization_percent": 80.0},
+            "node_crash_detection": {"available": True, "recent_crashes": 2},
+            "lease_revocation": {"available": True, "revocation_rate": 50.0},
+            "ip_pool": {"available": True, "utilization_percent": 90},
+        }
+        status = swarm_health_service._derive_health_status(results, 5)
+
+        assert status == "healthy"

@@ -19,6 +19,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
+from backend.services.alert_threshold_service import get_alert_threshold_service
+
 logger = logging.getLogger(__name__)
 
 # Singleton instance
@@ -193,24 +195,26 @@ class SwarmHealthService:
         if available_count < total:
             return "degraded"
 
-        # Rule 4: Domain thresholds
+        # Rule 4: Domain thresholds (configurable via AlertThresholdService)
+        thresholds = get_alert_threshold_service().get_thresholds()
+
         buffer = results.get("result_buffer", {})
-        if buffer.get("available") and buffer.get("utilization_percent", 0) > 80:
+        if buffer.get("available") and buffer.get("utilization_percent", 0) > thresholds.buffer_utilization:
             return "degraded"
 
         crash = results.get("node_crash_detection", {})
-        if crash.get("available") and crash.get("recent_crashes", 0) >= 3:
+        if crash.get("available") and crash.get("recent_crashes", 0) >= thresholds.crash_count:
             return "degraded"
 
         revocation = results.get("lease_revocation", {})
         if (
             revocation.get("available")
-            and revocation.get("revocation_rate", 0) > 50.0
+            and revocation.get("revocation_rate", 0) > thresholds.revocation_rate
         ):
             return "degraded"
 
         ip_pool = results.get("ip_pool", {})
-        if ip_pool.get("available") and ip_pool.get("utilization_percent", 0) > 90:
+        if ip_pool.get("available") and ip_pool.get("utilization_percent", 0) > thresholds.ip_pool_utilization:
             return "degraded"
 
         # Rule 5: Everything looks good
