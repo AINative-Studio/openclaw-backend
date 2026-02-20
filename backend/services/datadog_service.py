@@ -62,7 +62,7 @@ class DatadogService:
     Datadog Observability Service
 
     Provides:
-    - DogStatsD custom metrics (record_*() methods mirroring Prometheus counters)
+    - HTTP API custom metrics (record_*() methods mirroring Prometheus counters)
     - LLMObs span helpers (workflow_span, agent_span, tool_span)
     - annotate_span() for adding input/output metadata
     - get_status() for health checks
