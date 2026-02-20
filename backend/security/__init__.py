@@ -1,6 +1,4 @@
-"""
-Security module for message signing and verification.
-"""
+"""Security services for OpenClaw."""
 
 from backend.security.peer_key_store import PeerKeyStore
 from backend.security.message_verification_service import MessageVerificationService
