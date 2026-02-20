@@ -1,45 +1,45 @@
-"""
-P2P Protocol Implementations
+"""P2P Protocols for OpenCLAW Agent Swarm."""
 
-This module provides protocol implementations for OpenCLAW P2P communication.
+# Task Result Protocol
+try:
+    from backend.p2p.protocols.task_result import (
+        TaskResultProtocol,
+        TaskResultMessage,
+        TaskResultResponse,
+        ExecutionMetadata,
+    )
+except ImportError:
+    pass
 
-Refs #29, #30
-"""
+# Task Progress Protocol
+try:
+    from backend.p2p.protocols.task_progress import (
+        TaskProgressMessage,
+        TaskProgressService,
+        ProgressHeartbeatScheduler,
+    )
+except ImportError:
+    pass
 
-from backend.p2p.protocols.task_progress import (
-    TaskProgressMessage,
-    TaskProgressService,
-    ProgressValidationError,
-    InvalidLeaseTokenError,
-    ProgressHeartbeatScheduler,
-)
-from backend.p2p.protocols.task_result import (
-    TaskResultProtocol,
-    TaskResultMessage,
-    TaskResultResponse,
-    TaskStatus,
-    ExecutionMetadata,
-    TokenValidationError,
-    AuthorizationError,
-    SignatureValidationError,
-    LeaseExpiredError
-)
+# Task Request Protocol
+try:
+    from backend.p2p.protocols.task_request import (
+        TaskRequestMessage,
+        TaskAckMessage,
+        TaskRequestProtocol,
+    )
+except ImportError:
+    pass
 
-__all__ = [
-    # TaskProgress protocol
-    "TaskProgressMessage",
-    "TaskProgressService",
-    "ProgressValidationError",
-    "InvalidLeaseTokenError",
-    "ProgressHeartbeatScheduler",
-    # TaskResult protocol
-    "TaskResultProtocol",
-    "TaskResultMessage",
-    "TaskResultResponse",
-    "TaskStatus",
-    "ExecutionMetadata",
-    "TokenValidationError",
-    "AuthorizationError",
-    "SignatureValidationError",
-    "LeaseExpiredError"
-]
+# Task Failure Protocol
+try:
+    from backend.p2p.protocols.task_failure import (
+        TaskFailureMessage,
+        TaskFailureHandler,
+        FailureType,
+        ErrorCategory,
+    )
+except ImportError:
+    pass
+
+__all__ = []
