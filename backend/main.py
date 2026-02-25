@@ -99,6 +99,12 @@ def _register_routers() -> None:
     except Exception as e:
         print(f"Warning: agent_template router not loaded: {e}")
 
+    try:
+        from backend.api.v1.endpoints.workspace_settings import router as workspace_settings_router
+        app.include_router(workspace_settings_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: workspace_settings router not loaded: {e}")
+
 _register_routers()
 
 
@@ -117,6 +123,19 @@ async def startup():
             db.close()
     except Exception as e:
         print(f"Warning: template seeding failed: {e}")
+
+    # Initialize default agents (main agent with Haiku model)
+    try:
+        from backend.services.agent_initialization_service import initialize_agents_on_startup
+        from backend.db.base import SessionLocal
+        db = SessionLocal()
+        try:
+            result = await initialize_agents_on_startup(db)
+            print(f"✅ Agent initialization: {result.get('main_agent', {}).get('status', 'unknown')}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"Warning: agent initialization failed: {e}")
 
     # Initialize Datadog LLMObs singleton when enabled
     if os.getenv("DD_LLMOBS_ENABLED", "0") == "1":

@@ -9,6 +9,7 @@ delete (soft), and execute heartbeat.
 """
 
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -26,6 +27,7 @@ try:
         UpdateAgentSettingsRequest,
         HeartbeatExecutionResponse,
     )
+    from pydantic import BaseModel
     from backend.models.agent_lifecycle import AgentSwarmInstance
     AGENT_LIFECYCLE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError) as e:
@@ -169,11 +171,11 @@ def create_agent(
     status_code=status.HTTP_200_OK,
     summary="Provision agent",
 )
-def provision_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
+async def provision_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
-        agent = service.provision_agent(agent_id)
+        agent = await service.provision_agent(agent_id)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -346,4 +348,57 @@ def execute_heartbeat(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to execute heartbeat: {str(e)}",
+        )
+
+
+class SendMessageRequest(BaseModel):
+    message: str
+
+
+class SendMessageResponse(BaseModel):
+    response: str
+    agent_id: str
+    message_id: str
+
+
+@router.post(
+    "/{agent_id}/message",
+    response_model=SendMessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Send message to agent",
+)
+async def send_message(
+    agent_id: str,
+    request: SendMessageRequest,
+    db: Session = Depends(get_db),
+) -> SendMessageResponse:
+    _check_available()
+    try:
+        service = AgentLifecycleApiService(db)
+        agent = service.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {agent_id} not found",
+            )
+
+        if not agent.openclaw_session_key:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Agent must be provisioned before sending messages",
+            )
+
+        result = await service.send_message_to_agent(agent_id, request.message)
+        return SendMessageResponse(
+            response=result.get("response", ""),
+            agent_id=agent_id,
+            message_id=result.get("message_id", str(uuid.uuid4())),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending message to agent {agent_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send message: {str(e)}",
         )

@@ -9,6 +9,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import dotenv from 'dotenv';
 import { AgentMessageWorkflow } from './workflows/agent-message-workflow.js';
+import { AgentLifecycleWorkflow } from './workflows/agent-lifecycle-workflow.js';
 dotenv.config();
 const PORT = parseInt(process.env.PORT || '8080');
 /**
@@ -63,6 +64,78 @@ async function startGateway() {
                 success: true,
                 workflowUuid: handle.getWorkflowUUID(),
                 result,
+            });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            res.status(500).json({ error: errorMessage });
+        }
+    });
+    // Agent provisioning workflow endpoint
+    app.post('/workflows/provision-agent', async (req, res) => {
+        try {
+            const request = {
+                agentId: req.body.agentId,
+                name: req.body.name,
+                persona: req.body.persona,
+                model: req.body.model,
+                userId: req.body.userId,
+                sessionKey: req.body.sessionKey,
+                heartbeatEnabled: req.body.heartbeatEnabled,
+                heartbeatInterval: req.body.heartbeatInterval,
+                heartbeatChecklist: req.body.heartbeatChecklist,
+                configuration: req.body.configuration
+            };
+            const handle = await DBOS.startWorkflow(AgentLifecycleWorkflow).provisionAgentWorkflow(request);
+            const result = await handle.getResult();
+            res.json({
+                success: true,
+                workflowUuid: handle.getWorkflowUUID(),
+                result
+            });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            res.status(500).json({ error: errorMessage });
+        }
+    });
+    // Heartbeat execution workflow endpoint
+    app.post('/workflows/heartbeat', async (req, res) => {
+        try {
+            const request = {
+                agentId: req.body.agentId,
+                sessionKey: req.body.sessionKey,
+                checklist: req.body.checklist,
+                executionId: req.body.executionId
+            };
+            const handle = await DBOS.startWorkflow(AgentLifecycleWorkflow).heartbeatWorkflow(request);
+            const result = await handle.getResult();
+            res.json({
+                success: true,
+                workflowUuid: handle.getWorkflowUUID(),
+                result
+            });
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            res.status(500).json({ error: errorMessage });
+        }
+    });
+    // Pause/Resume workflow endpoint
+    app.post('/workflows/pause-resume', async (req, res) => {
+        try {
+            const request = {
+                agentId: req.body.agentId,
+                action: req.body.action,
+                sessionKey: req.body.sessionKey,
+                preserveState: req.body.preserveState
+            };
+            const handle = await DBOS.startWorkflow(AgentLifecycleWorkflow).pauseResumeWorkflow(request);
+            const result = await handle.getResult();
+            res.json({
+                success: true,
+                workflowUuid: handle.getWorkflowUUID(),
+                result
             });
         }
         catch (error) {
