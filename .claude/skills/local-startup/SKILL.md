@@ -11,6 +11,48 @@ This skill ensures all prerequisites are met before starting the complete OpenCl
 
 All three services must be running for the full system to work.
 
+## 🔥 NEW: Smart Port Conflict Resolution
+
+The startup script now includes **automated port conflict resolution** with three modes:
+
+### Port Conflict Modes
+
+**1. Ask Mode (Default)** - Prompts user to choose:
+```bash
+# Default behavior - interactive prompts
+scripts/start-all-local.sh
+```
+
+**2. Kill Mode** - Automatically kills conflicting processes:
+```bash
+# Auto-kill any process using required ports
+OPENCLAW_PORT_CONFLICT_MODE=kill scripts/start-all-local.sh
+```
+
+**3. Reassign Mode** - Uses alternative ports automatically:
+```bash
+# Automatically find and use free ports
+OPENCLAW_PORT_CONFLICT_MODE=reassign scripts/start-all-local.sh
+```
+
+**4. Error Mode** - Fails immediately on conflicts:
+```bash
+# Strict mode - fail if ports are occupied
+OPENCLAW_PORT_CONFLICT_MODE=error scripts/start-all-local.sh
+```
+
+### How It Works
+
+- **Port 18789 (Gateway)**: Cannot be reassigned (backend needs fixed URL), but can auto-kill
+- **Port 8000 (Backend)**: Can be reassigned to 8001, 8002, etc.
+- **Port 3002 (Frontend)**: Can be reassigned to 3003, 3004, etc.
+
+When a port conflict is detected:
+1. Shows which process is using the port
+2. Based on mode: kills process, finds alternative port, or prompts user
+3. Updates environment variables automatically
+4. Displays final URLs in summary
+
 ## Prerequisites Checklist
 
 ### 1. OpenClaw Gateway
@@ -206,11 +248,27 @@ open http://localhost:8000/docs
 ## Common Issues
 
 ### 1. Port Already in Use
+
+**✨ NOW AUTOMATED!** The startup script handles port conflicts automatically.
+
+**Manual Resolution** (if needed):
 ```bash
 # Find process using port 8000
 lsof -i :8000
 # Kill it
 kill -9 <PID>
+```
+
+**Automatic Resolution** (recommended):
+```bash
+# Let the script handle it interactively
+scripts/start-all-local.sh  # Choose [k]ill or [r]eassign
+
+# Or use auto-kill mode
+OPENCLAW_PORT_CONFLICT_MODE=kill scripts/start-all-local.sh
+
+# Or use reassignment mode
+OPENCLAW_PORT_CONFLICT_MODE=reassign scripts/start-all-local.sh
 ```
 
 ### 2. Import Errors

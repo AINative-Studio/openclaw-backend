@@ -11,26 +11,158 @@ echo ""
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Port conflict resolution mode (can be overridden via env var)
+# Options: "kill", "reassign", "ask", "error"
+PORT_CONFLICT_MODE="${OPENCLAW_PORT_CONFLICT_MODE:-ask}"
 
 # Function to check if port is in use
 check_port() {
     lsof -i :$1 > /dev/null 2>&1
 }
 
+# Function to kill process on specific port
+kill_port() {
+    local port=$1
+    local pids=$(lsof -ti :$port 2>/dev/null)
+
+    if [ ! -z "$pids" ]; then
+        echo -e "   ${YELLOW}⚠️  Killing process on port $port (PIDs: $pids)${NC}"
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+        sleep 1
+        return 0
+    fi
+    return 1
+}
+
+# Function to find next available port starting from base
+find_free_port() {
+    local base_port=$1
+    local port=$base_port
+    local max_attempts=100
+
+    while check_port $port && [ $max_attempts -gt 0 ]; do
+        port=$((port + 1))
+        max_attempts=$((max_attempts - 1))
+    done
+
+    if [ $max_attempts -eq 0 ]; then
+        echo -e "   ${RED}❌ Could not find free port after $base_port${NC}" >&2
+        return 1
+    fi
+
+    echo $port
+}
+
+# Function to handle port conflict with smart resolution
+resolve_port_conflict() {
+    local service_name=$1
+    local required_port=$2
+    local allow_reassign=${3:-true}  # Whether this service supports port reassignment
+
+    if ! check_port $required_port; then
+        # Port is free, no conflict
+        echo $required_port
+        return 0
+    fi
+
+    # Port is in use - get process info
+    local process_info=$(lsof -i :$required_port 2>/dev/null | tail -n +2 | head -1)
+    echo -e "   ${YELLOW}⚠️  Port $required_port is in use${NC}" >&2
+    echo -e "   ${BLUE}Process: $process_info${NC}" >&2
+
+    case "$PORT_CONFLICT_MODE" in
+        kill)
+            echo -e "   ${YELLOW}🔧 Auto-killing conflicting process...${NC}" >&2
+            kill_port $required_port
+            echo $required_port
+            return 0
+            ;;
+
+        reassign)
+            if [ "$allow_reassign" = "true" ]; then
+                local new_port=$(find_free_port $required_port)
+                echo -e "   ${BLUE}🔄 Reassigning to port $new_port${NC}" >&2
+                echo $new_port
+                return 0
+            else
+                echo -e "   ${RED}❌ Service $service_name cannot use alternate port${NC}" >&2
+                return 1
+            fi
+            ;;
+
+        ask)
+            echo -e "   ${BLUE}Choose action:${NC}" >&2
+            echo -e "   ${BLUE}  [k] Kill process and use port $required_port${NC}" >&2
+            if [ "$allow_reassign" = "true" ]; then
+                echo -e "   ${BLUE}  [r] Reassign to next available port${NC}" >&2
+            fi
+            echo -e "   ${BLUE}  [a] Abort startup${NC}" >&2
+            read -p "   Your choice: " -n 1 -r choice
+            echo "" >&2
+
+            case "$choice" in
+                k|K)
+                    kill_port $required_port
+                    echo $required_port
+                    return 0
+                    ;;
+                r|R)
+                    if [ "$allow_reassign" = "true" ]; then
+                        local new_port=$(find_free_port $required_port)
+                        echo -e "   ${GREEN}✅ Using port $new_port${NC}" >&2
+                        echo $new_port
+                        return 0
+                    else
+                        echo -e "   ${RED}❌ Invalid choice${NC}" >&2
+                        return 1
+                    fi
+                    ;;
+                *)
+                    echo -e "   ${RED}❌ Startup aborted${NC}" >&2
+                    return 1
+                    ;;
+            esac
+            ;;
+
+        error)
+            echo -e "   ${RED}❌ Port conflict mode set to 'error'${NC}" >&2
+            echo -e "   ${YELLOW}Tip: Set OPENCLAW_PORT_CONFLICT_MODE=kill or =reassign${NC}" >&2
+            return 1
+            ;;
+
+        *)
+            echo -e "   ${RED}❌ Invalid PORT_CONFLICT_MODE: $PORT_CONFLICT_MODE${NC}" >&2
+            return 1
+            ;;
+    esac
+}
+
 # 1. Check/Start Gateway
 echo "1️⃣  OpenClaw Gateway (port 18789)"
-if curl -s http://localhost:18789/health > /dev/null 2>&1; then
-    echo -e "   ${GREEN}✅ Already running${NC}"
+GATEWAY_PORT=18789
+
+if curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1; then
+    echo -e "   ${GREEN}✅ Already running on port $GATEWAY_PORT${NC}"
 else
-    if check_port 18789; then
-        echo -e "   ${RED}❌ Port in use by another process${NC}"
-        echo "   Run: lsof -ti :18789 | xargs kill"
+    # Resolve port conflict (Gateway requires fixed port for backend to connect)
+    GATEWAY_PORT=$(resolve_port_conflict "Gateway" 18789 false)
+    if [ $? -ne 0 ]; then
+        echo -e "   ${RED}❌ Cannot start Gateway - port conflict${NC}"
         exit 1
     fi
 
-    echo "   Starting gateway in background..."
+    echo "   Starting gateway on port $GATEWAY_PORT..."
     cd openclaw-gateway/
+
+    # Update .env if port changed
+    if [ "$GATEWAY_PORT" != "18789" ]; then
+        echo -e "   ${YELLOW}⚠️  Using non-default port $GATEWAY_PORT${NC}"
+        echo "PORT=$GATEWAY_PORT" >> .env
+    fi
+
     npm start > /tmp/openclaw-gateway.log 2>&1 &
     GATEWAY_PID=$!
     cd ..
@@ -38,14 +170,14 @@ else
     # Wait for gateway to be ready
     echo "   Waiting for gateway to start..."
     for i in {1..30}; do
-        if curl -s http://localhost:18789/health > /dev/null 2>&1; then
-            echo -e "   ${GREEN}✅ Started (PID: $GATEWAY_PID)${NC}"
+        if curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1; then
+            echo -e "   ${GREEN}✅ Started on port $GATEWAY_PORT (PID: $GATEWAY_PID)${NC}"
             break
         fi
         sleep 1
     done
 
-    if ! curl -s http://localhost:18789/health > /dev/null 2>&1; then
+    if ! curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1; then
         echo -e "   ${RED}❌ Gateway failed to start. Check logs: tail -f /tmp/openclaw-gateway.log${NC}"
         exit 1
     fi
@@ -63,39 +195,42 @@ fi
 
 # Set environment variables
 export SECRET_KEY="dev-secret-key-for-local-testing"
-export OPENCLAW_GATEWAY_URL="http://localhost:18789"
+export OPENCLAW_GATEWAY_URL="http://localhost:$GATEWAY_PORT"
 export OPENCLAW_GATEWAY_TOKEN="openclaw-dev-token-12345"
 export ENVIRONMENT="development"
 export DATABASE_URL="sqlite:///./openclaw.db"
-echo -e "   ${GREEN}✅ Environment configured${NC}"
+echo -e "   ${GREEN}✅ Environment configured (Gateway: http://localhost:$GATEWAY_PORT)${NC}"
 echo ""
 
 # 3. Start Backend
 echo "3️⃣  Backend API (port 8000)"
-if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-    echo -e "   ${GREEN}✅ Already running${NC}"
+BACKEND_PORT=8000
+
+if curl -s http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
+    echo -e "   ${GREEN}✅ Already running on port $BACKEND_PORT${NC}"
 else
-    if check_port 8000; then
-        echo -e "   ${RED}❌ Port in use by another process${NC}"
-        echo "   Run: lsof -ti :8000 | xargs kill"
+    # Resolve port conflict (Backend can run on alternative port)
+    BACKEND_PORT=$(resolve_port_conflict "Backend" 8000 true)
+    if [ $? -ne 0 ]; then
+        echo -e "   ${RED}❌ Cannot start Backend - port conflict${NC}"
         exit 1
     fi
 
-    echo "   Starting backend in background..."
-    python3 -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000 > /tmp/openclaw-backend.log 2>&1 &
+    echo "   Starting backend on port $BACKEND_PORT..."
+    python3 -m uvicorn backend.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT > /tmp/openclaw-backend.log 2>&1 &
     BACKEND_PID=$!
 
     # Wait for backend to be ready
     echo "   Waiting for backend to start (this includes agent initialization)..."
     for i in {1..30}; do
-        if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo -e "   ${GREEN}✅ Started (PID: $BACKEND_PID)${NC}"
+        if curl -s http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
+            echo -e "   ${GREEN}✅ Started on port $BACKEND_PORT (PID: $BACKEND_PID)${NC}"
             break
         fi
         sleep 1
     done
 
-    if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+    if ! curl -s http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
         echo -e "   ${RED}❌ Backend failed to start. Check logs: tail -f /tmp/openclaw-backend.log${NC}"
         exit 1
     fi
@@ -111,6 +246,8 @@ echo ""
 
 # 4. Check/Setup Frontend
 echo "4️⃣  Frontend Dashboard (port 3002)"
+FRONTEND_PORT=3002
+
 if [ ! -d "../agent-swarm-monitor" ]; then
     echo -e "   ${RED}❌ Frontend directory not found at ../agent-swarm-monitor/${NC}"
     echo "   Skipping frontend startup"
@@ -123,23 +260,42 @@ else
         npm install
     fi
 
-    # Create .env if it doesn't exist
-    if [ ! -f .env ]; then
-        echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env
+    # Update or create .env with backend URL
+    if [ -f .env ]; then
+        sed -i.bak "s|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://localhost:$BACKEND_PORT|g" .env
+        rm -f .env.bak
+    else
+        echo "NEXT_PUBLIC_API_URL=http://localhost:$BACKEND_PORT" > .env
         echo "   Created .env file"
     fi
 
-    # Start frontend
-    if check_port 3002; then
-        echo -e "   ${GREEN}✅ Already running${NC}"
+    # Resolve port conflict (Frontend can run on alternative port)
+    if check_port $FRONTEND_PORT && ! curl -s http://localhost:$FRONTEND_PORT > /dev/null 2>&1; then
+        FRONTEND_PORT=$(resolve_port_conflict "Frontend" 3002 true)
+        if [ $? -ne 0 ]; then
+            echo -e "   ${RED}❌ Cannot start Frontend - port conflict${NC}"
+            cd ../openclaw-backend/
+            exit 1
+        fi
+    fi
+
+    # Start frontend if not already running
+    if curl -s http://localhost:$FRONTEND_PORT > /dev/null 2>&1; then
+        echo -e "   ${GREEN}✅ Already running on port $FRONTEND_PORT${NC}"
     else
-        echo "   Starting frontend in background..."
+        echo "   Starting frontend on port $FRONTEND_PORT..."
+
+        # Set PORT env var if using non-default port
+        if [ "$FRONTEND_PORT" != "3002" ]; then
+            export PORT=$FRONTEND_PORT
+        fi
+
         npm run dev > /tmp/openclaw-frontend.log 2>&1 &
         FRONTEND_PID=$!
 
         # Wait for frontend to be ready
         sleep 5
-        echo -e "   ${GREEN}✅ Started (PID: $FRONTEND_PID)${NC}"
+        echo -e "   ${GREEN}✅ Started on port $FRONTEND_PORT (PID: $FRONTEND_PID)${NC}"
     fi
 
     cd ../openclaw-backend/
@@ -151,10 +307,10 @@ echo "======================================"
 echo -e "${GREEN}✅ All services started!${NC}"
 echo ""
 echo "📍 Service URLs:"
-echo "   Gateway:  http://localhost:18789"
-echo "   Backend:  http://localhost:8000"
-echo "   Frontend: http://localhost:3002"
-echo "   API Docs: http://localhost:8000/docs"
+echo "   Gateway:  http://localhost:$GATEWAY_PORT"
+echo "   Backend:  http://localhost:$BACKEND_PORT"
+echo "   Frontend: http://localhost:${FRONTEND_PORT:-3002}"
+echo "   API Docs: http://localhost:$BACKEND_PORT/docs"
 echo ""
 echo "📋 Logs:"
 echo "   Gateway:  tail -f /tmp/openclaw-gateway.log"
@@ -162,11 +318,23 @@ echo "   Backend:  tail -f /tmp/openclaw-backend.log"
 echo "   Frontend: tail -f /tmp/openclaw-frontend.log"
 echo ""
 echo "🔍 Verify agents:"
-echo "   curl http://localhost:8000/api/v1/agents?limit=50 | python3 -m json.tool"
+echo "   curl http://localhost:$BACKEND_PORT/api/v1/agents?limit=50 | python3 -m json.tool"
+echo ""
+echo "⚙️  Port Configuration:"
+echo "   Mode: $PORT_CONFLICT_MODE"
+if [ "$GATEWAY_PORT" != "18789" ] || [ "$BACKEND_PORT" != "8000" ] || [ "${FRONTEND_PORT:-3002}" != "3002" ]; then
+    echo -e "   ${YELLOW}⚠️  Using non-default ports due to conflicts${NC}"
+fi
 echo ""
 echo "🛑 To stop all services:"
-echo "   ./stop-all-local.sh"
+echo "   scripts/stop-all-local.sh"
+echo ""
+echo "💡 Port Conflict Resolution Modes:"
+echo "   OPENCLAW_PORT_CONFLICT_MODE=kill     # Auto-kill conflicting processes"
+echo "   OPENCLAW_PORT_CONFLICT_MODE=reassign # Use alternative ports"
+echo "   OPENCLAW_PORT_CONFLICT_MODE=ask      # Prompt user (default)"
+echo "   OPENCLAW_PORT_CONFLICT_MODE=error    # Fail on conflicts"
 echo ""
 echo "🌐 Opening frontend in browser..."
 sleep 2
-open http://localhost:3002 2>/dev/null || echo "   Open manually: http://localhost:3002"
+open http://localhost:${FRONTEND_PORT:-3002} 2>/dev/null || echo "   Open manually: http://localhost:${FRONTEND_PORT:-3002}"

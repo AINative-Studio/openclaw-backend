@@ -7,6 +7,33 @@ skill: local-startup
 
 This command starts the complete OpenClaw stack locally: Gateway, Backend API, and Frontend Dashboard.
 
+## 🔥 Smart Port Conflict Resolution
+
+The startup script automatically handles port conflicts with **4 resolution modes**:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| **ask** (default) | Prompts user for choice | Interactive development |
+| **kill** | Auto-kills conflicting processes | CI/CD, automated setups |
+| **reassign** | Uses alternative ports | Multi-instance testing |
+| **error** | Fails on conflicts | Strict environments |
+
+### Quick Examples
+
+```bash
+# Interactive mode (default)
+scripts/start-all-local.sh
+
+# Auto-kill conflicting processes
+OPENCLAW_PORT_CONFLICT_MODE=kill scripts/start-all-local.sh
+
+# Use alternative ports automatically
+OPENCLAW_PORT_CONFLICT_MODE=reassign scripts/start-all-local.sh
+
+# Strict mode - fail on conflicts
+OPENCLAW_PORT_CONFLICT_MODE=error scripts/start-all-local.sh
+```
+
 ## Complete 3-Service Startup
 
 **Terminal 1 - OpenClaw Gateway** (port 18789):
