@@ -7,6 +7,10 @@ skill: local-startup
 
 This command starts the complete OpenClaw stack locally: Gateway, Backend API, and Frontend Dashboard.
 
+## 🔌 Generic Framework
+
+OpenClaw uses the **generic port-management skill framework**, which can be reused across ALL AINative applications. See `.claude/skills/port-management/` for documentation and examples for other stacks (simple API, full-stack, microservices, etc.).
+
 ## 🔥 Smart Port Conflict Resolution
 
 The startup script automatically handles port conflicts with **4 resolution modes**:

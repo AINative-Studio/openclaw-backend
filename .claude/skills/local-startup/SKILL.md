@@ -2,6 +2,12 @@
 
 **USE THIS SKILL** when starting the complete OpenClaw system locally or when the user requests to run the system locally.
 
+## ⚡ Built on Generic Port Management Framework
+
+This skill is **OpenClaw's implementation** of the generic `port-management` skill framework. The port management system is designed to work across **ALL AINative applications**, not just OpenClaw.
+
+**For other projects**: See `.claude/skills/port-management/` for the reusable framework and examples.
+
 ## Overview
 
 This skill ensures all prerequisites are met before starting the complete OpenClaw stack locally:
@@ -10,6 +16,8 @@ This skill ensures all prerequisites are met before starting the complete OpenCl
 3. **Frontend Dashboard** (Next.js app on port 3002)
 
 All three services must be running for the full system to work.
+
+**Configuration**: See `.claude/port-config.json` for OpenClaw's port and service definitions.
 
 ## 🔥 NEW: Smart Port Conflict Resolution
 
