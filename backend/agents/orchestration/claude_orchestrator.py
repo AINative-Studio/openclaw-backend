@@ -27,9 +27,9 @@ from dataclasses import dataclass, field
 
 from contextlib import contextmanager
 
-from app.agents.orchestration.command_parser import CommandParser, CommandType, CommandParseError
-from app.agents.orchestration.notification_service import NotificationService
-from app.agents.swarm.nouscoder_agent_spawner import NousCoderAgentSpawner, AgentLifecycleState
+from backend.agents.orchestration.command_parser import CommandParser, CommandType, CommandParseError
+from backend.agents.orchestration.notification_service import NotificationService
+from backend.agents.swarm.nouscoder_agent_spawner import NousCoderAgentSpawner, AgentLifecycleState
 
 logger = logging.getLogger(__name__)
 

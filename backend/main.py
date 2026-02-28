@@ -105,6 +105,12 @@ def _register_routers() -> None:
     except Exception as e:
         print(f"Warning: workspace_settings router not loaded: {e}")
 
+    try:
+        from backend.api.v1.endpoints.channels import router as channels_router
+        app.include_router(channels_router)
+    except Exception as e:
+        print(f"Warning: channels router not loaded: {e}")
+
 _register_routers()
 
 

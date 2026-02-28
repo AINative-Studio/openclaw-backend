@@ -54,17 +54,22 @@ def get_provisioning_service() -> WireGuardProvisioningService:
     Returns:
         WireGuardProvisioningService instance
     """
+    import os
     global _provisioning_service
 
     if _provisioning_service is None:
         # Initialize service with default configuration
         # In production, these values would come from environment variables
+        config_path = os.getenv(
+            "WIREGUARD_CONFIG_PATH",
+            "/Users/aideveloper/openclaw-backend/.wireguard/wg0.conf"
+        )
         _provisioning_service = WireGuardProvisioningService(
             ip_pool_network="10.0.0.0/24",
             hub_public_key="hub_wireguard_public_key_placeholder==",
             hub_endpoint="hub.example.com:51820",
             hub_ip="10.0.0.1",
-            config_path="/etc/wireguard/wg0.conf",
+            config_path=config_path,
             enable_dbos=False  # Will enable when E4-S1 is ready
         )
 

@@ -151,6 +151,14 @@ class CommandParser:
                 logger.warning("anthropic package not installed - LLM parsing disabled")
                 self.use_llm = False
 
+    # WhatsApp system message patterns to ignore (QR codes, pairing, etc.)
+    IGNORE_PATTERNS = [
+        r"^whatsapp<[A-Z0-9]+>$",  # QR code: whatsapp<YNW998WM>
+        r"^.*pairing\s+approve\s+whatsapp<[A-Z0-9]+>$",  # Pairing: Openclaw pairing approve whatsapp<CODE>
+        r"^pairing\s+code:?\s*[A-Z0-9\-]+$",  # Pairing code: pairing code: XXXX-XXXX
+        r"^qr\s+code:?",  # QR code messages
+    ]
+
     def parse(self, command: str) -> ParsedCommand:
         """
         Parse a command string into a structured ParsedCommand
@@ -171,6 +179,14 @@ class CommandParser:
         # Normalize command (strip, lowercase for matching)
         normalized = command.strip().lower()
         raw_command = command.strip()
+
+        # Filter out WhatsApp system messages (QR codes, pairing, etc.)
+        for ignore_pattern in self.IGNORE_PATTERNS:
+            if re.match(ignore_pattern, normalized, re.IGNORECASE):
+                logger.info(f"Ignoring WhatsApp system message: {raw_command[:50]}")
+                raise CommandParseError(
+                    f"Ignored WhatsApp system message (QR/pairing code)"
+                )
 
         # Try to match against known patterns
         for command_type, patterns in self.PATTERNS.items():
