@@ -131,7 +131,7 @@ def _register_routers() -> None:
 
     try:
         from backend.api.v1.endpoints.channels import router as channels_router
-        app.include_router(channels_router)
+        app.include_router(channels_router, prefix=prefix)
     except Exception as e:
         print(f"Warning: channels router not loaded: {e}")
 
