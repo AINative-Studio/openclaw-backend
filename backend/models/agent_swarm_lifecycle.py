@@ -25,8 +25,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from uuid import uuid4
-from app.db.base_class import Base
-from app.models.base_models import UUIDMixin
+from backend.db.base_class import Base
 from sqlalchemy.sql import func
 
 
@@ -57,7 +56,7 @@ class HeartbeatExecutionStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-class AgentSwarmInstance(Base, UUIDMixin):
+class AgentSwarmInstance(Base):
     """
     Agent Swarm Instance Model
 
@@ -125,7 +124,7 @@ class AgentSwarmInstance(Base, UUIDMixin):
         return f"<AgentSwarmInstance {self.name} ({self.status})>"
 
 
-class AgentHeartbeatExecution(Base, UUIDMixin):
+class AgentHeartbeatExecution(Base):
     """
     Agent Heartbeat Execution Model
 
