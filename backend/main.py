@@ -105,6 +105,36 @@ def _register_routers() -> None:
     except Exception as e:
         print(f"Warning: workspace_settings router not loaded: {e}")
 
+    try:
+        from backend.api.v1.endpoints.network_management import router as network_mgmt_router
+        app.include_router(network_mgmt_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: network_management router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.task_queue import router as task_queue_router
+        app.include_router(task_queue_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: task_queue router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.api_keys import router as api_keys_router
+        app.include_router(api_keys_router)
+    except Exception as e:
+        print(f"Warning: api_keys router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.security import router as security_router
+        app.include_router(security_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: security router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.channels import router as channels_router
+        app.include_router(channels_router)
+    except Exception as e:
+        print(f"Warning: channels router not loaded: {e}")
+
 _register_routers()
 
 
