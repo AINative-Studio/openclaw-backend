@@ -296,10 +296,9 @@ class AgentLifecycleApiService:
         if not agent:
             return None
 
-        agent.status = AgentSwarmStatus.STOPPED
-        agent.stopped_at = datetime.now(timezone.utc)
+        # Actually delete the agent record from the database
+        self.db.delete(agent)
         self.db.commit()
-        self.db.refresh(agent)
         return agent
 
     def execute_heartbeat(self, agent_id: str) -> Optional[dict]:
@@ -356,6 +355,7 @@ class AgentLifecycleApiService:
 
         # Get gateway URL from environment
         gateway_url = os.getenv("OPENCLAW_GATEWAY_URL", "ws://localhost:18789")
+        gateway_token = os.getenv("OPENCLAW_TOKEN")
 
         # Convert http:// to ws:// if needed
         if gateway_url.startswith("http://"):
@@ -364,19 +364,38 @@ class AgentLifecycleApiService:
             gateway_url = gateway_url.replace("https://", "wss://")
 
         # Create bridge client and connect
-        bridge = OpenClawBridge(url=gateway_url)
+        bridge = OpenClawBridge(url=gateway_url, token=gateway_token)
 
         try:
             # Connect with proper authentication
             await bridge.connect()
 
-            # Send message to agent
+            # Send message to agent and wait for final response
             result = await bridge.send_to_agent(
                 session_key=agent.openclaw_session_key,
-                message=message
+                message=message,
+                timeout_seconds=600
             )
 
-            return result
+            # Extract response text from payloads
+            # Result structure: {result: {payloads: [{text: "..."}], meta: {...}}}
+            payloads = result.get("result", {}).get("payloads", [])
+            response_parts = []
+
+            for payload in payloads:
+                text = payload.get("text", "")
+                if text:
+                    response_parts.append(text)
+
+            response_text = "\n".join(response_parts) if response_parts else "No response received from agent."
+
+            return {
+                "response": response_text,
+                "status": "completed",
+                "runId": result.get("runId"),
+                "payloads": payloads,
+                "meta": result.get("result", {}).get("meta", {})
+            }
 
         finally:
             # Always close the connection

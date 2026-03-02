@@ -40,33 +40,91 @@ class OpenClawGatewayProxyService:
     """
 
     SUPPORTED_CHANNELS = {
+        # Core messaging channels (OpenClaw plugins)
         "whatsapp": {
             "name": "WhatsApp",
-            "required_config": ["phone_number", "api_key"]
+            "plugin_id": "whatsapp",
+            "required_config": []  # QR code scan, no config needed
         },
         "telegram": {
             "name": "Telegram",
+            "plugin_id": "telegram",
             "required_config": ["bot_token"]
         },
         "discord": {
             "name": "Discord",
+            "plugin_id": "discord",
             "required_config": ["bot_token"]
         },
         "slack": {
             "name": "Slack",
-            "required_config": ["webhook_url"]
+            "plugin_id": "slack",
+            "required_config": ["app_token", "bot_token"]
         },
-        "email": {
-            "name": "Email",
-            "required_config": []
-        },
-        "sms": {
-            "name": "SMS",
-            "required_config": ["account_sid", "auth_token"]
-        },
-        "teams": {
+        "msteams": {
             "name": "Microsoft Teams",
+            "plugin_id": "msteams",
+            "required_config": []  # OAuth flow
+        },
+        "signal": {
+            "name": "Signal",
+            "plugin_id": "signal",
+            "required_config": ["phone_number"]
+        },
+        "matrix": {
+            "name": "Matrix",
+            "plugin_id": "matrix",
+            "required_config": ["homeserver_url", "access_token"]
+        },
+        "googlechat": {
+            "name": "Google Chat",
+            "plugin_id": "googlechat",
             "required_config": ["webhook_url"]
+        },
+        "imessage": {
+            "name": "iMessage",
+            "plugin_id": "imessage",
+            "required_config": []  # macOS only
+        },
+        "line": {
+            "name": "LINE",
+            "plugin_id": "line",
+            "required_config": ["channel_access_token", "channel_secret"]
+        },
+        "mattermost": {
+            "name": "Mattermost",
+            "plugin_id": "mattermost",
+            "required_config": ["webhook_url"]
+        },
+        "nextcloud-talk": {
+            "name": "Nextcloud Talk",
+            "plugin_id": "nextcloud-talk",
+            "required_config": ["server_url", "username", "password"]
+        },
+        "nostr": {
+            "name": "Nostr",
+            "plugin_id": "nostr",
+            "required_config": ["private_key", "relays"]
+        },
+        "tlon": {
+            "name": "Tlon/Urbit",
+            "plugin_id": "tlon",
+            "required_config": ["ship_url"]
+        },
+        "twitch": {
+            "name": "Twitch",
+            "plugin_id": "twitch",
+            "required_config": ["channel_name", "oauth_token"]
+        },
+        "zalo": {
+            "name": "Zalo",
+            "plugin_id": "zalo",
+            "required_config": ["app_id", "secret_key"]
+        },
+        "bluebubbles": {
+            "name": "BlueBubbles",
+            "plugin_id": "bluebubbles",
+            "required_config": ["server_url", "password"]
         }
     }
 

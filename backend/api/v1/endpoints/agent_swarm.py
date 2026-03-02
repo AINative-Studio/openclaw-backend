@@ -349,14 +349,14 @@ def resume_swarm(swarm_id: str, db: Session = Depends(get_db)) -> SwarmResponse:
 @router.delete(
     "/{swarm_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete swarm (soft delete)",
+    summary="Delete swarm",
 )
 def delete_swarm(swarm_id: str, db: Session = Depends(get_db)) -> None:
     _check_available()
     try:
         service = AgentSwarmApiService(db)
-        swarm = service.stop_swarm(swarm_id)
-        if not swarm:
+        deleted = service.delete_swarm(swarm_id)
+        if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Swarm {swarm_id} not found",

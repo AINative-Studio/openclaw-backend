@@ -169,10 +169,10 @@ def get_provisioning_service() -> WireGuardProvisioningService:
             "/Users/aideveloper/openclaw-backend/.wireguard/wg0.conf"
         )
         _provisioning_service = WireGuardProvisioningService(
-            ip_pool_network="10.0.0.0/24",
-            hub_public_key="hub_wireguard_public_key_placeholder==",
-            hub_endpoint="hub.example.com:51820",
-            hub_ip="10.0.0.1",
+            ip_pool_network=os.getenv("WIREGUARD_IP_POOL", "10.8.0.0/24"),
+            hub_public_key=os.getenv("WIREGUARD_HUB_PUBLIC_KEY", "hub_wireguard_public_key_placeholder=="),
+            hub_endpoint=os.getenv("WIREGUARD_HUB_ENDPOINT", "localhost:51820"),
+            hub_ip=os.getenv("WIREGUARD_HUB_IP", "10.8.0.1"),
             config_path=config_path,
             enable_dbos=False
         )
@@ -704,13 +704,14 @@ async def get_network_topology(
         # Build nodes list
         nodes = []
 
-        # Add hub node
+        # Add hub node (hub is always online if this endpoint is serving)
         hub_node = TopologyNode(
             id='hub',
             label='Hub Node',
             type='hub',
             ip_address=service.hub_ip,
-            public_key=service.hub_public_key
+            public_key=service.hub_public_key,
+            status='online'
         )
         nodes.append(hub_node)
 

@@ -5,6 +5,10 @@ Registers all API routers and initializes the database.
 """
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,6 +110,12 @@ def _register_routers() -> None:
         print(f"Warning: workspace_settings router not loaded: {e}")
 
     try:
+        from backend.api.v1.endpoints.team import router as team_router
+        app.include_router(team_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: team router not loaded: {e}")
+
+    try:
         from backend.api.v1.endpoints.network_management import router as network_mgmt_router
         app.include_router(network_mgmt_router, prefix=prefix)
     except Exception as e:
@@ -124,6 +134,12 @@ def _register_routers() -> None:
         print(f"Warning: api_keys router not loaded: {e}")
 
     try:
+        from backend.api.v1.endpoints.user_api_keys import router as user_api_keys_router
+        app.include_router(user_api_keys_router)
+    except Exception as e:
+        print(f"Warning: user_api_keys router not loaded: {e}")
+
+    try:
         from backend.api.v1.endpoints.security import router as security_router
         app.include_router(security_router, prefix=prefix)
     except Exception as e:
@@ -134,6 +150,12 @@ def _register_routers() -> None:
         app.include_router(channels_router, prefix=prefix)
     except Exception as e:
         print(f"Warning: channels router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.openclaw_skills import router as openclaw_skills_router
+        app.include_router(openclaw_skills_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: openclaw_skills router not loaded: {e}")
 
 _register_routers()
 

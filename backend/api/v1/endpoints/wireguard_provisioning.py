@@ -17,6 +17,7 @@ Security:
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
@@ -60,11 +61,11 @@ def get_provisioning_service() -> WireGuardProvisioningService:
         # Initialize service with default configuration
         # In production, these values would come from environment variables
         _provisioning_service = WireGuardProvisioningService(
-            ip_pool_network="10.0.0.0/24",
-            hub_public_key="hub_wireguard_public_key_placeholder==",
-            hub_endpoint="hub.example.com:51820",
-            hub_ip="10.0.0.1",
-            config_path="/etc/wireguard/wg0.conf",
+            ip_pool_network=os.getenv("WIREGUARD_IP_POOL", "10.0.0.0/24"),
+            hub_public_key=os.getenv("WIREGUARD_HUB_PUBLIC_KEY", ""),
+            hub_endpoint=os.getenv("WIREGUARD_HUB_ENDPOINT", "localhost:51820"),
+            hub_ip=os.getenv("WIREGUARD_HUB_IP", "10.0.0.1"),
+            config_path=os.getenv("WIREGUARD_CONFIG_PATH", os.path.expanduser("~/.wireguard/wg0.conf")),
             enable_dbos=False  # Will enable when E4-S1 is ready
         )
 

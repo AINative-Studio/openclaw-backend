@@ -1,0 +1,22 @@
+database:
+  hostname: ${PGHOST}
+  port: ${PGPORT}
+  username: ${PGUSER}
+  password: ${PGPASSWORD}
+  app_db_name: railway
+  sys_db_name: railway
+  app_db_client: knex
+  migrate: []
+  rollback: []
+  connectionTimeoutMillis: 10000
+  ssl_ca: null
+  ssl_cert: null
+  ssl_key: null
+  ssl_server_name: null
+  ssl_accept_unauthorized: true
+
+runtimeConfig:
+  entrypoints:
+    - dist/workflows/agent-lifecycle-workflow.js
+    - dist/workflows/agent-message-workflow.js
+  port: 18790

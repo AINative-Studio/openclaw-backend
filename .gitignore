@@ -36,3 +36,8 @@ openclaw.db
 # OS
 .DS_Store
 Thumbs.db
+.wireguard/
+
+# Node.js
+node_modules/
+openclaw-gateway/dist/

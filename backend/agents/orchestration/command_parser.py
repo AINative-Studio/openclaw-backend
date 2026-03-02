@@ -118,7 +118,9 @@ class CommandParser:
         self,
         default_repository: Optional[str] = None,
         use_llm: bool = True,
-        llm_model: str = "claude-3-5-haiku-20241022"
+        llm_model: str = "claude-3-5-haiku-20241022",
+        workspace_id: Optional[str] = None,
+        db_session: Optional[object] = None
     ):
         """
         Initialize command parser
@@ -127,6 +129,8 @@ class CommandParser:
             default_repository: Default repository when not specified in command
             use_llm: Enable LLM parsing for natural language (default: True)
             llm_model: Claude model for natural language parsing (Haiku is fast/cheap)
+            workspace_id: Workspace UUID for user API key lookup (optional)
+            db_session: SQLAlchemy session for user API key lookup (optional)
         """
         self.default_repository = default_repository or os.getenv(
             "GITHUB_DEFAULT_REPO",
@@ -134,18 +138,43 @@ class CommandParser:
         )
         self.use_llm = use_llm
         self.llm_model = llm_model
+        self.workspace_id = workspace_id
         self.client = None
 
         # Initialize Anthropic client if LLM parsing enabled
         if use_llm:
             try:
                 from anthropic import Anthropic
-                api_key = os.getenv("ANTHROPIC_API_KEY")
+
+                # Priority: user key > system key (Issue #96)
+                api_key = None
+                if workspace_id and db_session:
+                    try:
+                        from backend.services.user_api_key_service import UserAPIKeyService
+                        key_service = UserAPIKeyService(db_session)
+                        api_key = key_service.get_key(workspace_id, "anthropic")
+                        if api_key:
+                            logger.info(
+                                f"CommandParser using workspace-level Anthropic API key "
+                                f"for workspace {workspace_id}"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to fetch user API key for workspace {workspace_id}: {e}. "
+                            "Falling back to system key."
+                        )
+
+                # Fallback to system key if user key not found
+                if not api_key:
+                    api_key = os.getenv("ANTHROPIC_API_KEY")
+                    if api_key:
+                        logger.info("CommandParser using system-level Anthropic API key")
+
                 if api_key:
                     self.client = Anthropic(api_key=api_key)
                     logger.info(f"CommandParser initialized with LLM support (model: {llm_model})")
                 else:
-                    logger.warning("ANTHROPIC_API_KEY not found - LLM parsing disabled")
+                    logger.warning("No Anthropic API key found (user or system) - LLM parsing disabled")
                     self.use_llm = False
             except ImportError:
                 logger.warning("anthropic package not installed - LLM parsing disabled")

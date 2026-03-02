@@ -42,7 +42,7 @@ class OpenClawBridge:
             "minProtocol": 3,
             "maxProtocol": 3,
             "client": {
-                "id": "ainative-agent-swarm",
+                "id": "cli",
                 "displayName": "AINative Agent Swarm",
                 "version": "1.0.0",
                 "platform": "python",
@@ -65,9 +65,20 @@ class OpenClawBridge:
                     # Response to our request
                     request_id = data["id"]
                     if request_id in self.pending:
-                        future = self.pending.pop(request_id)
+                        pending = self.pending[request_id]
+                        payload = data.get("payload", {})
+                        status = payload.get("status")
+
+                        # If expectFinal is True and we got "accepted", ignore and keep waiting
+                        if pending["expect_final"] and status == "accepted":
+                            continue
+
+                        # Got final response or expectFinal is False
+                        future = pending["future"]
+                        self.pending.pop(request_id)
+
                         if data.get("ok"):
-                            future.set_result(data.get("payload"))
+                            future.set_result(payload)
                         else:
                             error_msg = data.get("error", {}).get("message", "Unknown error")
                             future.set_exception(Exception(error_msg))
@@ -82,8 +93,14 @@ class OpenClawBridge:
             self._connected = False
             print("OpenClaw connection closed")
 
-    async def _request(self, method: str, params: Any = None) -> Any:
-        """Send RPC request and wait for response"""
+    async def _request(self, method: str, params: Any = None, expect_final: bool = False) -> Any:
+        """Send RPC request and wait for response
+
+        Args:
+            method: RPC method name
+            params: Method parameters
+            expect_final: If True, ignore intermediate "accepted" status and wait for final result
+        """
         request_id = str(uuid.uuid4())
         frame = {
             "type": "req",
@@ -93,7 +110,7 @@ class OpenClawBridge:
         }
 
         future = asyncio.Future()
-        self.pending[request_id] = future
+        self.pending[request_id] = {"future": future, "expect_final": expect_final}
 
         await self.ws.send(json.dumps(frame))
         return await future
@@ -102,12 +119,24 @@ class OpenClawBridge:
         """Register event handler"""
         self.handlers[event] = handler
 
-    async def send_to_agent(self, session_key: str, message: str) -> Dict[str, Any]:
-        """Send message to specific agent session"""
-        return await self._request("agent.send", {
+    async def send_to_agent(self, session_key: str, message: str, timeout_seconds: int = 600) -> Dict[str, Any]:
+        """Send message to specific agent session and wait for response
+
+        Args:
+            session_key: Agent session key (e.g., "agent:main:main")
+            message: Message to send to agent
+            timeout_seconds: Timeout for agent response (default 600s / 10 minutes)
+
+        Returns:
+            dict with 'result' containing payloads and meta, or error information
+        """
+        idempotency_key = str(uuid.uuid4())
+        return await self._request("agent", {
             "sessionKey": session_key,
-            "message": message
-        })
+            "message": message,
+            "idempotencyKey": idempotency_key,
+            "timeout": timeout_seconds
+        }, expect_final=True)
 
     async def delegate_task(self, agent_profile: str, task: str) -> str:
         """

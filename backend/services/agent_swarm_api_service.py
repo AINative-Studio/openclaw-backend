@@ -206,3 +206,13 @@ class AgentSwarmApiService:
         self.db.commit()
         self.db.refresh(swarm)
         return swarm
+
+    def delete_swarm(self, swarm_id: str) -> bool:
+        """Actually delete a swarm from the database"""
+        swarm = self.get_swarm(swarm_id)
+        if not swarm:
+            return False
+
+        self.db.delete(swarm)
+        self.db.commit()
+        return True

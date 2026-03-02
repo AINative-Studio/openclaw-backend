@@ -19,6 +19,7 @@ Security considerations:
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 import threading
@@ -98,7 +99,7 @@ class WireGuardProvisioningService:
         hub_public_key: str = "",
         hub_endpoint: str = "hub.example.com:51820",
         hub_ip: str = "10.0.0.1",
-        config_path: str = "/etc/wireguard/wg0.conf",
+        config_path: str = os.getenv("WIREGUARD_CONFIG_PATH", os.path.expanduser("~/.wireguard/wg0.conf")),
         enable_dbos: bool = False
     ):
         """

@@ -154,7 +154,7 @@ else
         exit 1
     fi
 
-    echo "   Starting gateway on port $GATEWAY_PORT..."
+    echo "   Starting DBOS gateway on port $GATEWAY_PORT..."
     cd openclaw-gateway/
 
     # Update .env if port changed
@@ -163,7 +163,13 @@ else
         echo "PORT=$GATEWAY_PORT" >> .env
     fi
 
-    npm start > /tmp/openclaw-gateway.log 2>&1 &
+    # Load PostgreSQL credentials from parent .env
+    if [ -f "../.env" ]; then
+        export $(grep -E "^(PGHOST|PGPORT|PGUSER|PGPASSWORD|PGDATABASE)=" ../.env | xargs)
+    fi
+
+    # Start DBOS gateway with proper environment
+    PORT=$GATEWAY_PORT node dist/server.js > /tmp/openclaw-gateway.log 2>&1 &
     GATEWAY_PID=$!
     cd ..
 

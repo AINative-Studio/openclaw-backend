@@ -87,7 +87,7 @@ class WireGuardConfigManager:
         _lock: Thread lock for concurrent access safety
     """
 
-    def __init__(self, config_path: str = "/etc/wireguard/wg0.conf"):
+    def __init__(self, config_path: str = os.getenv("WIREGUARD_CONFIG_PATH", os.path.expanduser("~/.wireguard/wg0.conf"))):
         """
         Initialize config manager
 
