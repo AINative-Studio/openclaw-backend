@@ -14,6 +14,32 @@ Backend infrastructure for AgentClaw — an autonomous multi-agent development p
 - **Go 1.21** — libp2p bootstrap node for P2P discovery
 - **WireGuard** — Hub-and-spoke VPN for secure agent-to-agent communication
 
+## Critical: OpenClaw Gateway DBOS Configuration
+
+**ZERO TOLERANCE RULE**: DBOS SDK reads PostgreSQL SSL configuration from **environment variables**, NOT from `dbos-config.yaml`.
+
+**Required in `openclaw-gateway/.env`**:
+```env
+# PostgreSQL credentials
+PGHOST=yamabiko.proxy.rlwy.net
+PGPORT=51955
+PGUSER=postgres
+PGPASSWORD=<railway-password>
+PGDATABASE=railway
+
+# CRITICAL: DBOS SDK SSL configuration (NOT in dbos-config.yaml!)
+PGSSLMODE=disable              # For Railway self-signed certificates
+PGCONNECT_TIMEOUT=10           # Connection timeout in seconds
+```
+
+**Common Error**:
+```
+DBOSInitializationError: Unable to connect to system database
+self-signed certificate in certificate chain: (SELF_SIGNED_CERT_IN_CHAIN)
+```
+
+**Solution**: Add `PGSSLMODE=disable` to `.env` (see `docs/DBOS_GATEWAY_SETUP_IMPROVEMENTS.md`)
+
 ## Directory Structure
 
 ```
