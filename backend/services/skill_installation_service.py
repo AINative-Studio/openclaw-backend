@@ -172,7 +172,7 @@ INSTALLABLE_SKILLS: Dict[str, Dict[str, str]] = {
     "summarize": {
         "method": "manual",
         "description": "Summarization tool requiring manual setup",
-        "docs": "https://github.com/openclaw/summarize",
+        "docs": "https://github.com/ossianhempel/things3-cli",
         "requirements": ["Configuration file"]
     },
     "gog": {
