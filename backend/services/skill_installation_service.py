@@ -34,18 +34,12 @@ class InstallResult:
 # Source: https://github.com/INSTINCTx/neuro-skills
 # Published to: https://www.npmjs.com/org/instinctx_dev
 INSTALLABLE_SKILLS: Dict[str, Dict[str, str]] = {
-    # NPM Install (13 skills) - All from @instinctx_dev/neuro-skill-* packages
+    # NPM Auto-Install (3 skills) - VERIFIED WORKING
     "bear-notes": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-bear-notes",
         "binary": "grizzly",
         "description": "Bear Notes CLI tool"
-    },
-    "bird": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-bird",
-        "binary": "bird",
-        "description": "Twitter/X CLI tool"
     },
     "blogwatcher": {
         "method": "npm",
@@ -53,65 +47,75 @@ INSTALLABLE_SKILLS: Dict[str, Dict[str, str]] = {
         "binary": "blogwatcher",
         "description": "Blog monitoring tool"
     },
-    "camsnap": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-camsnap",
-        "binary": "camsnap",
-        "description": "RTSP/ONVIF camera snapshot tool"
-    },
-    "gifgrep": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-gifgrep",
-        "binary": "gifgrep",
-        "description": "GIF search and extraction tool"
-    },
-    "imsg": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-imsg",
-        "binary": "imsg",
-        "description": "iMessage CLI interface"
-    },
-    "peekaboo": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-peekaboo",
-        "binary": "peekaboo",
-        "description": "Camera preview tool"
-    },
-    "songsee": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-songsee",
-        "binary": "songsee",
-        "description": "Music recognition tool"
-    },
     "blucli": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-blucli",
         "binary": "blu",
         "description": "Bluetooth CLI tool"
     },
-    "eightctl": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-eightctl",
-        "binary": "eightctl",
-        "description": "Home automation control"
+
+    # Manual - Homebrew Required (3 skills)
+    "bird": {
+        "method": "manual",
+        "description": "Twitter/X CLI tool requiring Homebrew installation",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["Homebrew: brew install bird"]
+    },
+    "camsnap": {
+        "method": "manual",
+        "description": "RTSP/ONVIF camera snapshot tool requiring Homebrew",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["Homebrew: brew install camsnap"]
     },
     "openhue": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-openhue",
-        "binary": "openhue",
-        "description": "Philips Hue CLI"
+        "method": "manual",
+        "description": "Philips Hue CLI requiring Homebrew",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["Homebrew: brew install openhue"]
+    },
+
+    # Manual - NPM Package Not Published (7 skills)
+    "gifgrep": {
+        "method": "manual",
+        "description": "GIF search tool - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-gifgrep must be published"]
+    },
+    "imsg": {
+        "method": "manual",
+        "description": "iMessage CLI - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-imsg must be published"]
+    },
+    "peekaboo": {
+        "method": "manual",
+        "description": "Camera preview tool - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-peekaboo must be published"]
+    },
+    "songsee": {
+        "method": "manual",
+        "description": "Music recognition tool - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-songsee must be published"]
+    },
+    "eightctl": {
+        "method": "manual",
+        "description": "Home automation control - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-eightctl must be published"]
     },
     "sonoscli": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-sonoscli",
-        "binary": "sonos",
-        "description": "Sonos speaker control"
+        "method": "manual",
+        "description": "Sonos speaker control - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-sonoscli must be published"]
     },
     "ordercli": {
-        "method": "npm",
-        "package": "@instinctx_dev/neuro-skill-food-order",
-        "binary": "ordercli",
-        "description": "Order management CLI"
+        "method": "manual",
+        "description": "Order management CLI - NPM package not yet published",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["NPM package @instinctx_dev/neuro-skill-food-order must be published"]
     },
 
     # Manual/Complex (14 skills) - Return documentation only
