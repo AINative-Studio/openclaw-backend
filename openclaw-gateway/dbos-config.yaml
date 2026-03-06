@@ -9,11 +9,6 @@ database:
   migrate: []
   rollback: []
   connectionTimeoutMillis: 10000
-  ssl_ca: null
-  ssl_cert: null
-  ssl_key: null
-  ssl_server_name: null
-  ssl_accept_unauthorized: true
 
 runtimeConfig:
   entrypoints:
