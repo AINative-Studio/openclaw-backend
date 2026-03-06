@@ -38,66 +38,79 @@ INSTALLABLE_SKILLS: Dict[str, Dict[str, str]] = {
     "bear-notes": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-bear-notes",
+        "binary": "grizzly",
         "description": "Bear Notes CLI tool"
     },
     "bird": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-bird",
+        "binary": "bird",
         "description": "Twitter/X CLI tool"
     },
     "blogwatcher": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-blogwatcher",
+        "binary": "blogwatcher",
         "description": "Blog monitoring tool"
     },
     "camsnap": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-camsnap",
+        "binary": "camsnap",
         "description": "RTSP/ONVIF camera snapshot tool"
     },
     "gifgrep": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-gifgrep",
+        "binary": "gifgrep",
         "description": "GIF search and extraction tool"
     },
     "imsg": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-imsg",
+        "binary": "imsg",
         "description": "iMessage CLI interface"
     },
     "peekaboo": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-peekaboo",
+        "binary": "peekaboo",
         "description": "Camera preview tool"
     },
     "songsee": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-songsee",
+        "binary": "songsee",
         "description": "Music recognition tool"
     },
     "blucli": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-blucli",
+        "binary": "blu",
         "description": "Bluetooth CLI tool"
     },
     "eightctl": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-eightctl",
+        "binary": "eightctl",
         "description": "Home automation control"
     },
     "openhue": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-openhue",
+        "binary": "openhue",
         "description": "Philips Hue CLI"
     },
     "sonoscli": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-sonoscli",
+        "binary": "sonos",
         "description": "Sonos speaker control"
     },
     "ordercli": {
         "method": "npm",
         "package": "@instinctx_dev/neuro-skill-food-order",
+        "binary": "ordercli",
         "description": "Order management CLI"
     },
 
