@@ -167,11 +167,17 @@ async def install_skill(
 
     # Perform installation
     try:
-        # All skills are NEURO skills - use 2-step installation
         if method == InstallMethod.NPM:
+            # NEURO skills - use 2-step installation
             result = await service.install_neuro_skill(
                 skill_name=skill_name,
                 neuro_package=skill_data["package"],
+                timeout=request.timeout,
+            )
+        elif method == InstallMethod.BREW:
+            # Homebrew packages
+            result = await service.install_brew_package(
+                package_name=skill_data["package"],
                 timeout=request.timeout,
             )
         else:

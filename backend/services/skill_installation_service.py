@@ -16,6 +16,7 @@ class InstallMethod(str, Enum):
     """Installation method for a skill"""
     GO = "go"
     NPM = "npm"
+    BREW = "brew"
     MANUAL = "manual"
 
 
@@ -54,24 +55,24 @@ INSTALLABLE_SKILLS: Dict[str, Dict[str, str]] = {
         "description": "Bluetooth CLI tool"
     },
 
-    # Manual - Homebrew Required (3 skills)
+    # Homebrew Auto-Install (3 skills)
     "bird": {
-        "method": "manual",
-        "description": "Twitter/X CLI tool requiring Homebrew installation",
-        "docs": "https://github.com/INSTINCTx/neuro-skills",
-        "requirements": ["Homebrew: brew install bird"]
+        "method": "brew",
+        "package": "bird",
+        "binary": "bird",
+        "description": "Twitter/X CLI tool"
     },
     "camsnap": {
-        "method": "manual",
-        "description": "RTSP/ONVIF camera snapshot tool requiring Homebrew",
-        "docs": "https://github.com/INSTINCTx/neuro-skills",
-        "requirements": ["Homebrew: brew install camsnap"]
+        "method": "brew",
+        "package": "camsnap",
+        "binary": "camsnap",
+        "description": "RTSP/ONVIF camera snapshot tool"
     },
     "openhue": {
-        "method": "manual",
-        "description": "Philips Hue CLI requiring Homebrew",
-        "docs": "https://github.com/INSTINCTx/neuro-skills",
-        "requirements": ["Homebrew: brew install openhue"]
+        "method": "brew",
+        "package": "openhue",
+        "binary": "openhue",
+        "description": "Philips Hue CLI"
     },
 
     # Manual - NPM Package Not Published (7 skills)
@@ -583,6 +584,108 @@ class SkillInstallationService:
             )
 
     @staticmethod
+    async def install_brew_package(package_name: str, timeout: int = 300) -> InstallResult:
+        """
+        Install a package using Homebrew 'brew install'
+
+        Args:
+            package_name: Homebrew package name
+            timeout: Installation timeout in seconds (default: 300)
+
+        Returns:
+            InstallResult with success status and logs
+        """
+        logs: List[str] = []
+
+        try:
+            # Check if brew is installed
+            check_cmd = ["brew", "--version"]
+            check_process = await asyncio.create_subprocess_exec(
+                *check_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                check_process.communicate(),
+                timeout=10
+            )
+
+            if check_process.returncode != 0:
+                return InstallResult(
+                    success=False,
+                    message="Homebrew is not installed on this system",
+                    logs=["Error: 'brew' command not found", "Install from: https://brew.sh"],
+                    method=InstallMethod.BREW,
+                    package=package_name
+                )
+
+            brew_version = stdout.decode().strip().split('\n')[0]
+            logs.append(f"Using: {brew_version}")
+
+            # Install the package
+            install_cmd = ["brew", "install", package_name]
+            logs.append(f"Running: {' '.join(install_cmd)}")
+
+            process = await asyncio.create_subprocess_exec(
+                *install_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout
+            )
+
+            # Capture output
+            if stdout:
+                for line in stdout.decode().splitlines():
+                    logs.append(f"[stdout] {line}")
+
+            if stderr:
+                for line in stderr.decode().splitlines():
+                    logs.append(f"[stderr] {line}")
+
+            if process.returncode == 0:
+                logs.append("Installation successful")
+                return InstallResult(
+                    success=True,
+                    message=f"Successfully installed {package_name}",
+                    logs=logs,
+                    method=InstallMethod.BREW,
+                    package=package_name
+                )
+            else:
+                return InstallResult(
+                    success=False,
+                    message=f"Installation failed with exit code {process.returncode}",
+                    logs=logs,
+                    method=InstallMethod.BREW,
+                    package=package_name
+                )
+
+        except asyncio.TimeoutError:
+            logs.append(f"Installation timed out after {timeout} seconds")
+            return InstallResult(
+                success=False,
+                message=f"Installation timed out after {timeout} seconds",
+                logs=logs,
+                method=InstallMethod.BREW,
+                package=package_name
+            )
+        except Exception as e:
+            logs.append(f"Error: {str(e)}")
+            logger.exception(f"Error installing Homebrew package {package_name}")
+            return InstallResult(
+                success=False,
+                message=f"Installation error: {str(e)}",
+                logs=logs,
+                method=InstallMethod.BREW,
+                package=package_name
+            )
+
+    @staticmethod
     def get_install_method(skill_name: str) -> Optional[Dict[str, str]]:
         """
         Get installation method for a skill
@@ -609,7 +712,7 @@ class SkillInstallationService:
     @staticmethod
     def is_skill_installable(skill_name: str) -> bool:
         """
-        Check if a skill is installable (go or npm)
+        Check if a skill is installable (go, npm, or brew)
 
         Args:
             skill_name: Name of the skill
@@ -620,4 +723,4 @@ class SkillInstallationService:
         skill_info = INSTALLABLE_SKILLS.get(skill_name)
         if not skill_info:
             return False
-        return skill_info["method"] in [InstallMethod.GO, InstallMethod.NPM]
+        return skill_info["method"] in [InstallMethod.GO, InstallMethod.NPM, InstallMethod.BREW]
