@@ -240,9 +240,31 @@ async def check_skill_installation_status(
             "docs": skill_data.get("docs"),
         }
 
-    # Check if binary is in PATH
+    # Check if binary is in PATH or GOPATH/bin
     import shutil
-    binary_path = shutil.which(skill_data.get("binary", skill_name))
+    import os
+    import subprocess
+
+    binary_name = skill_data.get("binary", skill_name)
+    binary_path = shutil.which(binary_name)
+
+    # If not in PATH, check GOPATH/bin for Go-installed binaries
+    if not binary_path and skill_data["method"] == "npm":
+        try:
+            # Get GOPATH from go env
+            result = subprocess.run(
+                ["go", "env", "GOPATH"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                gopath = result.stdout.strip()
+                gobin = os.path.join(gopath, "bin", binary_name)
+                if os.path.exists(gobin) and os.access(gobin, os.X_OK):
+                    binary_path = gobin
+        except Exception:
+            pass  # GOPATH check failed, continue with None
 
     return {
         "skill_name": skill_name,
