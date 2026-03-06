@@ -55,24 +55,26 @@ INSTALLABLE_SKILLS: Dict[str, Dict[str, str]] = {
         "description": "Bluetooth CLI tool"
     },
 
-    # Homebrew Auto-Install (3 skills)
-    "bird": {
-        "method": "brew",
-        "package": "bird",
-        "binary": "bird",
-        "description": "Twitter/X CLI tool"
-    },
+    # Homebrew Auto-Install (1 skill)
     "camsnap": {
         "method": "brew",
-        "package": "camsnap",
+        "package": "steipete/tap/camsnap",
         "binary": "camsnap",
         "description": "RTSP/ONVIF camera snapshot tool"
     },
+
+    # Manual - Homebrew Formula Removed (2 skills)
+    "bird": {
+        "method": "manual",
+        "description": "Twitter/X CLI tool - Use NPM alternative: npm install -g @steipete/bird",
+        "docs": "https://bird.fast",
+        "requirements": ["NPM: npm install -g @steipete/bird"]
+    },
     "openhue": {
-        "method": "brew",
-        "package": "openhue",
-        "binary": "openhue",
-        "description": "Philips Hue CLI"
+        "method": "manual",
+        "description": "Philips Hue CLI - Homebrew formula not available",
+        "docs": "https://github.com/INSTINCTx/neuro-skills",
+        "requirements": ["Homebrew formula removed from tap"]
     },
 
     # Manual - NPM Package Not Published (7 skills)
