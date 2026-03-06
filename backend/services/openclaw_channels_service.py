@@ -61,7 +61,7 @@ def get_available_channels() -> Dict[str, Any]:
             ["openclaw", "channels", "capabilities", "--json"],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,  # Increased timeout - this command can take 15-20 seconds
             check=True,
         )
 
