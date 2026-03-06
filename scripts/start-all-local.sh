@@ -295,6 +295,16 @@ else
         fi
     fi
 
+    # Run pre-frontend-start hook to enforce API URL configuration
+    if [ -f ".claude/hooks/pre-frontend-start.sh" ]; then
+        ./.claude/hooks/pre-frontend-start.sh
+        if [ $? -ne 0 ]; then
+            echo -e "   ${RED}❌ Pre-start hook failed - frontend configuration error${NC}"
+            cd ../openclaw-backend/
+            exit 1
+        fi
+    fi
+
     # Start frontend if not already running
     if curl -s http://localhost:$FRONTEND_PORT > /dev/null 2>&1; then
         echo -e "   ${GREEN}✅ Already running on port $FRONTEND_PORT${NC}"
