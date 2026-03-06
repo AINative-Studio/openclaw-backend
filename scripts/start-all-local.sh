@@ -204,7 +204,8 @@ export SECRET_KEY="dev-secret-key-for-local-testing"
 export OPENCLAW_GATEWAY_URL="http://localhost:$GATEWAY_PORT"
 export OPENCLAW_GATEWAY_TOKEN="openclaw-dev-token-12345"
 export ENVIRONMENT="development"
-export DATABASE_URL="sqlite:///./openclaw.db"
+# Use PostgreSQL from .env file instead of SQLite
+export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://postgres:xDelQrUbmzAnRtgNqtNaNbaoAfKBftHM@yamabiko.proxy.rlwy.net:51955/railway}"
 echo -e "   ${GREEN}✅ Environment configured (Gateway: http://localhost:$GATEWAY_PORT)${NC}"
 echo ""
 
@@ -220,6 +221,15 @@ else
     if [ $? -ne 0 ]; then
         echo -e "   ${RED}❌ Cannot start Backend - port conflict${NC}"
         exit 1
+    fi
+
+    # Run pre-backend-start hook to enforce Railway database
+    if [ -f ".claude/hooks/pre-backend-start.sh" ]; then
+        ./.claude/hooks/pre-backend-start.sh
+        if [ $? -ne 0 ]; then
+            echo -e "   ${RED}❌ Pre-start hook failed - database validation error${NC}"
+            exit 1
+        fi
     fi
 
     echo "   Starting backend on port $BACKEND_PORT..."
