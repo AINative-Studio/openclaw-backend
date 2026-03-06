@@ -151,11 +151,43 @@ def _register_routers() -> None:
     except Exception as e:
         print(f"Warning: channels router not loaded: {e}")
 
+    # IMPORTANT: Register skill_installation_router BEFORE openclaw_skills_router
+    # to avoid /skills/installable being caught by /skills/{skill_name}
+    try:
+        from backend.api.v1.endpoints.skill_installation import router as skill_installation_router
+        app.include_router(skill_installation_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: skill_installation router not loaded: {e}")
+
     try:
         from backend.api.v1.endpoints.openclaw_skills import router as openclaw_skills_router
         app.include_router(openclaw_skills_router, prefix=prefix)
     except Exception as e:
         print(f"Warning: openclaw_skills router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.conversations import router as conversations_router
+        app.include_router(conversations_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: conversations router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.agent_skill_config import router as agent_skill_config_router
+        app.include_router(agent_skill_config_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: agent_skill_config router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.agent_channels import router as agent_channels_router
+        app.include_router(agent_channels_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: agent_channels router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.openclaw_channels import router as openclaw_channels_router
+        app.include_router(openclaw_channels_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: openclaw_channels router not loaded: {e}")
 
 _register_routers()
 
@@ -196,6 +228,76 @@ async def startup():
             get_datadog_service()
         except Exception:
             pass
+
+    # Register monitoring services for health dashboard
+    try:
+        from backend.services.swarm_health_service import get_swarm_health_service
+        from backend.services.prometheus_metrics_service import get_metrics_service
+        from backend.services.monitoring_integration_service import get_monitoring_integration_service
+
+        health_service = get_swarm_health_service()
+        metrics_service = get_metrics_service()
+        monitoring_service = get_monitoring_integration_service()
+
+        # Instantiate subsystem services for monitoring
+        subsystems = {}
+
+        # Lease expiration service
+        try:
+            from backend.services.lease_expiration_service import get_lease_expiration_service
+            subsystems["lease_expiration"] = get_lease_expiration_service()
+        except Exception as e:
+            print(f"Warning: lease_expiration service not available: {e}")
+
+        # Result buffer service
+        try:
+            from backend.services.result_buffer_service import get_result_buffer_service
+            subsystems["result_buffer"] = get_result_buffer_service()
+        except Exception as e:
+            print(f"Warning: result_buffer service not available: {e}")
+
+        # Partition detection service
+        try:
+            from backend.services.dbos_partition_detection_service import get_partition_detection_service
+            subsystems["partition_detection"] = get_partition_detection_service()
+        except Exception as e:
+            print(f"Warning: partition_detection service not available: {e}")
+
+        # Node crash detection service
+        try:
+            from backend.services.node_crash_detection_service import get_node_crash_detection_service
+            subsystems["node_crash_detection"] = get_node_crash_detection_service()
+        except Exception as e:
+            print(f"Warning: node_crash_detection service not available: {e}")
+
+        # Lease revocation service
+        try:
+            from backend.services.lease_revocation_service import get_lease_revocation_service
+            subsystems["lease_revocation"] = get_lease_revocation_service()
+        except Exception as e:
+            print(f"Warning: lease_revocation service not available: {e}")
+
+        # Duplicate prevention service
+        try:
+            from backend.services.duplicate_prevention_service import get_duplicate_prevention_service
+            subsystems["duplicate_prevention"] = get_duplicate_prevention_service()
+        except Exception as e:
+            print(f"Warning: duplicate_prevention service not available: {e}")
+
+        # Message verification service
+        try:
+            from backend.security.message_verification_service import get_message_verification_service
+            subsystems["message_verification"] = get_message_verification_service()
+        except Exception as e:
+            print(f"Warning: message_verification service not available: {e}")
+
+        # Bootstrap monitoring - registers all subsystems
+        # Note: IP pool service requires network configuration, so it's registered separately when needed
+        monitoring_service.bootstrap(subsystems)
+
+        print(f"✅ Monitoring services initialized with {len(subsystems)}/7 subsystems")
+    except Exception as e:
+        print(f"Warning: monitoring services initialization failed: {e}")
 
 
 @app.get("/health")
