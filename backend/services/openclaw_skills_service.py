@@ -25,15 +25,45 @@ class OpenClawSkillsService:
             Dict with 'total', 'ready', 'skills' list
         """
         try:
+            import os
+            # Ensure GOPATH/bin is in PATH for Go-installed skill binaries
+            env = os.environ.copy()
+            gopath = os.path.expanduser("~/go/bin")
+            homebrew_bin = "/opt/homebrew/bin"
+
+            # Add Go and Homebrew paths if not already present
+            if gopath not in env.get("PATH", ""):
+                env["PATH"] = f"{env.get('PATH', '')}:{gopath}"
+            if homebrew_bin not in env.get("PATH", ""):
+                env["PATH"] = f"{env.get('PATH', '')}:{homebrew_bin}"
+
+            # Use shell=True with full command to ensure PATH is available
             result = subprocess.run(
-                ["openclaw", "skills", "list", "--json"],
+                "which openclaw > /dev/null && openclaw skills list --json",
+                shell=True,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=20,  # Increased from 10s - openclaw can take 15+ seconds
+                executable="/bin/zsh",  # Use zsh which loads user PATH
+                env=env  # Pass modified environment with Go/Homebrew paths
             )
 
             if result.returncode == 0:
-                skills_data = json.loads(result.stdout)
+                # openclaw outputs Doctor UI followed by JSON
+                # Find where JSON starts (first line beginning with '{')
+                lines = result.stdout.split('\n')
+                json_start_idx = None
+                for i, line in enumerate(lines):
+                    if line.strip().startswith('{'):
+                        json_start_idx = i
+                        break
+
+                if json_start_idx is None:
+                    logger.error("Could not find JSON in openclaw output")
+                    return {"total": 0, "ready": 0, "skills": []}
+
+                json_output = '\n'.join(lines[json_start_idx:])
+                skills_data = json.loads(json_output)
                 skills = skills_data.get("skills", [])
 
                 # Count eligible (ready) skills
