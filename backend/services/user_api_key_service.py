@@ -1,5 +1,5 @@
 """
-User API Key Service - Encryption and Business Logic (Issue #96)
+User API Key Service - Encryption and Business Logic (Issue #96, #119)
 
 Handles encryption/decryption of workspace-level API keys using Fernet symmetric encryption.
 Provides CRUD operations and key verification against external APIs.
@@ -11,6 +11,11 @@ Security Features:
 - Masked key display (shows only last 4 characters)
 - Rate limiting on validation attempts (via endpoint)
 - Never logs or exposes plaintext keys
+
+Supported Providers (Issue #119):
+- Groq: Fast inference API
+- Mistral: Mistral AI models
+- Ollama: Local model deployment (stores connection URL)
 """
 
 import os
@@ -39,9 +44,12 @@ class UserAPIKeyService:
         - cohere: Cohere API
         - huggingface: HuggingFace API
         - google: Gemini API
+        - groq: Groq API (Issue #119)
+        - mistral: Mistral AI API (Issue #119)
+        - ollama: Ollama local models (Issue #119)
     """
 
-    SUPPORTED_PROVIDERS = ["anthropic", "openai", "cohere", "huggingface", "google"]
+    SUPPORTED_PROVIDERS = ["anthropic", "openai", "cohere", "huggingface", "google", "groq", "mistral", "ollama"]
 
     def __init__(self, db: Session, encryption_secret: Optional[str] = None):
         """
@@ -106,7 +114,7 @@ class UserAPIKeyService:
         """
         Mask an API key for safe display.
 
-        Shows only the last 4 characters (e.g., "sk-ant-***...1234").
+        Shows only the last 4 characters (e.g., "sk-ant-***...1234" or "gsk_***...1234").
 
         Args:
             plaintext_key: Plaintext API key
@@ -118,10 +126,23 @@ class UserAPIKeyService:
             return "***"
 
         # Extract prefix and last 4 chars
-        prefix = plaintext_key.split("-")[0] if "-" in plaintext_key else ""
+        # Support both dash-separated (sk-ant-) and underscore-separated (gsk_, msk_) prefixes
+        if "-" in plaintext_key:
+            prefix = plaintext_key.split("-")[0]
+            separator = "-"
+        elif "_" in plaintext_key:
+            prefix = plaintext_key.split("_")[0]
+            separator = "_"
+        else:
+            prefix = ""
+            separator = ""
+
         last_four = plaintext_key[-4:]
 
-        return f"{prefix}-***...{last_four}" if prefix else f"***...{last_four}"
+        if prefix:
+            return f"{prefix}{separator}***...{last_four}"
+        else:
+            return f"***...{last_four}"
 
     def add_key(
         self,
@@ -359,8 +380,8 @@ class UserAPIKeyService:
         Makes a lightweight test API call to verify the key works.
 
         Args:
-            provider: Provider to validate (anthropic, openai, cohere, huggingface, google)
-            api_key: Plaintext API key to test
+            provider: Provider to validate (anthropic, openai, cohere, huggingface, google, groq, mistral, ollama)
+            api_key: Plaintext API key to test (or connection URL for Ollama)
 
         Returns:
             Tuple of (is_valid: bool, message: str)
@@ -385,6 +406,12 @@ class UserAPIKeyService:
             return self._verify_huggingface(api_key)
         elif provider == "google":
             return self._verify_google(api_key)
+        elif provider == "groq":
+            return self._verify_groq(api_key)
+        elif provider == "mistral":
+            return self._verify_mistral(api_key)
+        elif provider == "ollama":
+            return self._verify_ollama(api_key)
         else:
             return False, f"Validation not implemented for provider '{provider}'"
 
@@ -465,3 +492,105 @@ class UserAPIKeyService:
             if "unauthorized" in error_msg or "invalid" in error_msg or "api_key" in error_msg:
                 return False, "Invalid Google API key"
             return False, f"Google API key verification failed: {str(e)}"
+
+    def _verify_groq(self, api_key: str) -> tuple[bool, str]:
+        """
+        Verify Groq API key (Issue #119).
+
+        Uses the Groq Python SDK to test API authentication.
+        """
+        try:
+            from groq import Groq
+
+            client = Groq(api_key=api_key)
+            # Test API call - list models (lightweight verification)
+            models = client.models.list()
+
+            # Verify we got a response
+            if models:
+                return True, "Groq API key is valid and authenticated successfully"
+            else:
+                return False, "Groq API returned empty response"
+
+        except ImportError:
+            return False, "Groq SDK not installed. Install with: pip install groq"
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "unauthorized" in error_msg or "invalid" in error_msg or "authentication" in error_msg:
+                return False, "Invalid Groq API key"
+            return False, f"Groq API key verification failed: {str(e)}"
+
+    def _verify_mistral(self, api_key: str) -> tuple[bool, str]:
+        """
+        Verify Mistral API key (Issue #119).
+
+        Uses the Mistral Python SDK to test API authentication.
+        """
+        try:
+            from mistralai import Mistral
+
+            client = Mistral(api_key=api_key)
+            # Test API call - list models (lightweight verification)
+            models = client.models.list()
+
+            # Verify we got a response
+            if models:
+                return True, "Mistral API key is valid and authenticated successfully"
+            else:
+                return False, "Mistral API returned empty response"
+
+        except ImportError:
+            return False, "Mistral SDK not installed. Install with: pip install mistralai"
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "unauthorized" in error_msg or "invalid" in error_msg or "authentication" in error_msg or "401" in error_msg:
+                return False, "Invalid Mistral API key"
+            return False, f"Mistral API key verification failed: {str(e)}"
+
+    def _verify_ollama(self, connection_url: str) -> tuple[bool, str]:
+        """
+        Verify Ollama connection (Issue #119).
+
+        Ollama is a local model deployment tool, so we validate the connection URL
+        rather than an API key. Tests connectivity to the Ollama API endpoint.
+
+        Args:
+            connection_url: Ollama server URL (e.g., "http://localhost:11434")
+
+        Returns:
+            Tuple of (is_valid: bool, message: str)
+        """
+        try:
+            import httpx
+
+            # Validate URL format
+            if not connection_url.startswith(("http://", "https://")):
+                return False, "Ollama connection URL must start with http:// or https://"
+
+            # Test connection to Ollama API
+            # Use /api/tags endpoint to list available models
+            tags_url = f"{connection_url.rstrip('/')}/api/tags"
+
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(tags_url)
+
+                if response.status_code == 200:
+                    # Verify response contains expected data structure
+                    data = response.json()
+                    if "models" in data or isinstance(data, dict):
+                        return True, f"Ollama connection valid - connected to {connection_url}"
+                    else:
+                        return False, "Ollama API returned unexpected response format"
+                elif response.status_code == 404:
+                    return False, f"Ollama API endpoint not found at {connection_url}"
+                else:
+                    return False, f"Ollama connection failed with status {response.status_code}"
+
+        except ImportError:
+            return False, "httpx library not installed. Install with: pip install httpx"
+        except httpx.ConnectError:
+            return False, f"Failed to connect to Ollama server at {connection_url}"
+        except httpx.TimeoutException:
+            return False, f"Ollama connection timed out at {connection_url}"
+        except Exception as e:
+            return False, f"Ollama connection verification failed: {str(e)}"

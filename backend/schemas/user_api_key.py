@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
 
 
-# Supported provider names
-SupportedProvider = Literal["anthropic", "openai", "cohere", "huggingface", "google"]
+# Supported provider names (Issue #119: Added Groq, Mistral, Ollama)
+SupportedProvider = Literal["anthropic", "openai", "cohere", "huggingface", "google", "groq", "mistral", "ollama"]
 
 
 class UserAPIKeyCreate(BaseModel):
@@ -25,7 +25,7 @@ class UserAPIKeyCreate(BaseModel):
     )
     provider: SupportedProvider = Field(
         ...,
-        description="Provider identifier (anthropic, openai, cohere, huggingface, google)"
+        description="Provider identifier (anthropic, openai, cohere, huggingface, google, groq, mistral, ollama)"
     )
     api_key: str = Field(
         ...,

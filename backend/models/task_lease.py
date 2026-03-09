@@ -81,6 +81,14 @@ class Task(Base):
     id = Column(UUID(), primary_key=True, default=uuid4)
     idempotency_key = Column(String(255), nullable=True, unique=True, index=True)
 
+    # Multi-tenant isolation (Issue #120)
+    workspace_id = Column(
+        UUID(),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=True,  # Nullable during migration, enforce NOT NULL after data migration
+        index=True
+    )
+
     # Task definition
     task_type = Column(String(100), nullable=False, index=True)
     payload = Column(JSON, nullable=False)
@@ -122,6 +130,7 @@ class Task(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
+    workspace = relationship("Workspace", foreign_keys=[workspace_id])
     leases = relationship(
         "TaskLease",
         back_populates="task",

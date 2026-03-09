@@ -1,7 +1,7 @@
 """
-User API Key Model for Workspace-Level Encrypted Storage (Issue #96)
+User API Key Model for Workspace-Level Encrypted Storage (Issue #96, #119)
 
-Stores encrypted API keys per workspace for external services (Anthropic, OpenAI, Cohere, HuggingFace).
+Stores encrypted API keys per workspace for external services (Anthropic, OpenAI, Cohere, HuggingFace, Google, Groq, Mistral, Ollama).
 Uses Fernet symmetric encryption to protect keys at rest.
 
 Security Features:
@@ -50,7 +50,7 @@ class UserAPIKey(Base):
     # Workspace identifier (UUID stored as string for now)
     workspace_id = Column(String(36), nullable=False, index=True)
 
-    # Provider name (anthropic, openai, cohere, huggingface, google)
+    # Provider name (anthropic, openai, cohere, huggingface, google, groq, mistral, ollama)
     provider = Column(String(50), nullable=False, index=True)
 
     # Encrypted key (Fernet ciphertext)

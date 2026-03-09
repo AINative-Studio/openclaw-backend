@@ -2,7 +2,7 @@
 Task Assignment Orchestrator Service
 
 Coordinates the complete task assignment flow:
-1. Match task to capable node based on requirements
+1. Match task to capable node based on requirements (using SwarmLoadBalancer)
 2. Issue lease via DBOS workflow
 3. Send TaskRequest via libp2p
 4. Track assignment state
@@ -11,7 +11,13 @@ Coordinates the complete task assignment flow:
 Implements circuit breaker pattern for peer communication
 and comprehensive error handling for distributed failures.
 
-Refs #35 (E5-S9: Task Assignment Orchestrator)
+Enhanced with SwarmLoadBalancer integration (Issue #113):
+- Intelligent agent selection using multiple strategies
+- Health monitoring and filtering
+- Performance-based decision making
+- Adaptive load balancing
+
+Refs #35 (E5-S9: Task Assignment Orchestrator), #113 (Load Balancer Migration)
 """
 
 import logging
@@ -22,6 +28,10 @@ from enum import Enum
 from sqlalchemy.orm import Session
 
 from backend.models.task_lease import Task, TaskLease, TaskStatus
+from backend.services.agent_load_balancer_service import (
+    SwarmLoadBalancer,
+    LoadBalancingStrategy
+)
 
 
 # Configure logging
@@ -96,6 +106,8 @@ class TaskAssignmentOrchestrator:
         libp2p_client: Any,
         dbos_service: Any,
         lease_duration_minutes: int = 10,
+        load_balancer: Optional[SwarmLoadBalancer] = None,
+        load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ADAPTIVE,
     ):
         """
         Initialize orchestrator
@@ -105,11 +117,27 @@ class TaskAssignmentOrchestrator:
             libp2p_client: libp2p client for P2P communication
             dbos_service: DBOS service for lease workflows
             lease_duration_minutes: Default lease duration (default: 10 min)
+            load_balancer: Optional SwarmLoadBalancer instance (creates default if None)
+            load_balancing_strategy: Strategy to use if creating default load balancer
         """
         self.db_session = db_session
         self.libp2p_client = libp2p_client
         self.dbos_service = dbos_service
         self.lease_duration_minutes = lease_duration_minutes
+
+        # Initialize load balancer
+        if load_balancer is None:
+            self.load_balancer = SwarmLoadBalancer(
+                db_session=db_session,
+                strategy=load_balancing_strategy
+            )
+        else:
+            self.load_balancer = load_balancer
+
+        logger.info(
+            f"TaskAssignmentOrchestrator initialized with load balancing strategy: "
+            f"{self.load_balancer.strategy.value}"
+        )
 
     async def assign_task(
         self,
@@ -152,22 +180,28 @@ class TaskAssignmentOrchestrator:
                     f"Task {task_id} is not in QUEUED status (current: {task.status})"
                 )
 
-            # Step 2: Determine requirements from task payload if not provided
-            if required_capabilities is None:
-                required_capabilities = self._extract_requirements_from_task(task)
+            # Step 2: Initialize load balancer metrics for available nodes
+            await self.load_balancer.initialize_agent_metrics(available_nodes)
 
-            # Step 3: Match task to capable node
-            matched_node = self._match_node_to_task(
-                required_capabilities, available_nodes
-            )
-            if matched_node is None:
+            # Step 3: Use load balancer to intelligently select best agent
+            assignment_result = await self.load_balancer.assign_task(task, available_nodes)
+
+            if assignment_result is None:
+                # Determine if it's due to capabilities or availability
+                if required_capabilities is None:
+                    required_capabilities = self._extract_requirements_from_task(task)
+
                 raise NoCapableNodesError(
-                    f"No capable nodes found for task {task_id} "
+                    f"No capable/available nodes found for task {task_id} "
                     f"with requirements: {required_capabilities}"
                 )
 
-            peer_id = matched_node["peer_id"]
-            logger.info(f"Matched task {task_id} to peer {peer_id}")
+            peer_id = assignment_result.peer_id
+            logger.info(
+                f"Load balancer assigned task {task_id} to peer {peer_id} "
+                f"(capability_match={assignment_result.capability_match_score:.2f}, "
+                f"performance={assignment_result.performance_score:.2f})"
+            )
 
             # Step 4: Issue lease via DBOS
             try:

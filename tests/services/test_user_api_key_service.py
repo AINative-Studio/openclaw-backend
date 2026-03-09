@@ -25,7 +25,8 @@ TEST_ENCRYPTION_SECRET = Fernet.generate_key().decode()
 def db_session():
     """Create an in-memory SQLite database for testing."""
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    # Only create the user_api_keys table to avoid SQLite/PostgreSQL ARRAY incompatibility
+    UserAPIKey.__table__.create(engine, checkfirst=True)
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
     yield session
@@ -416,3 +417,301 @@ class TestUserAPIKeyModelMethods:
         assert "hash-value" not in repr_str
         assert "test-workspace" in repr_str
         assert "anthropic" in repr_str
+
+
+class TestGroqProviderSupport:
+    """Test Groq provider support (Issue #119)."""
+
+    def test_add_groq_key_success(self, service, workspace_id):
+        """Test adding a Groq API key."""
+        plaintext_key = "gsk_test_groq_key_12345678901234567890"
+
+        user_api_key = service.add_key(
+            workspace_id=workspace_id,
+            provider="groq",
+            plaintext_key=plaintext_key,
+            validate=False
+        )
+
+        assert user_api_key.provider == "groq"
+        assert user_api_key.encrypted_key != plaintext_key
+        assert user_api_key.is_active is True
+
+    def test_get_groq_key_success(self, service, workspace_id):
+        """Test retrieving a Groq API key."""
+        plaintext_key = "gsk_test_groq_key_12345678901234567890"
+
+        service.add_key(workspace_id, "groq", plaintext_key, validate=False)
+        retrieved_key = service.get_key(workspace_id, "groq")
+
+        assert retrieved_key == plaintext_key
+
+    def test_mask_groq_key(self, service):
+        """Test key masking for Groq keys."""
+        key = "gsk_abcdefghijklmnopqrstuvwxyz1234"
+        masked = service.mask_key(key)
+
+        assert masked == "gsk_***...1234"
+        assert "abcdefghijklmnopqrstuvwxyz" not in masked
+
+    def test_validate_groq_key_invalid(self, service):
+        """Test validating an invalid Groq API key."""
+        is_valid, message = service.validate_key("groq", "gsk_invalid_key_12345")
+
+        assert is_valid is False
+        # Can be either "not installed" or "invalid" depending on whether SDK is available
+        assert any(word in message.lower() for word in ["fail", "invalid", "not installed", "install"])
+
+    @pytest.mark.skipif(
+        not os.getenv("GROQ_API_KEY"),
+        reason="GROQ_API_KEY not set - skipping live API test"
+    )
+    def test_validate_groq_key_valid(self, service):
+        """Test validating a valid Groq API key (requires real key)."""
+        api_key = os.getenv("GROQ_API_KEY")
+        is_valid, message = service.validate_key("groq", api_key)
+
+        assert is_valid is True
+        assert "valid" in message.lower() or "authenticated" in message.lower()
+
+    def test_add_groq_key_with_validation_invalid_raises_error(self, service, workspace_id):
+        """Test that adding Groq key with validation=True rejects invalid keys."""
+        with pytest.raises(ValueError, match="validation failed"):
+            service.add_key(
+                workspace_id=workspace_id,
+                provider="groq",
+                plaintext_key="gsk_invalid_key_12345",
+                validate=True
+            )
+
+    def test_update_groq_key_success(self, service, workspace_id):
+        """Test updating a Groq API key."""
+        old_key = "gsk_old_key_12345678901234567890"
+        new_key = "gsk_new_key_98765432109876543210"
+
+        service.add_key(workspace_id, "groq", old_key, validate=False)
+        service.update_key(workspace_id, "groq", new_key, validate=False)
+
+        retrieved = service.get_key(workspace_id, "groq")
+        assert retrieved == new_key
+
+
+class TestMistralProviderSupport:
+    """Test Mistral provider support (Issue #119)."""
+
+    def test_add_mistral_key_success(self, service, workspace_id):
+        """Test adding a Mistral API key."""
+        plaintext_key = "msk_test_mistral_key_12345678901234567890"
+
+        user_api_key = service.add_key(
+            workspace_id=workspace_id,
+            provider="mistral",
+            plaintext_key=plaintext_key,
+            validate=False
+        )
+
+        assert user_api_key.provider == "mistral"
+        assert user_api_key.encrypted_key != plaintext_key
+        assert user_api_key.is_active is True
+
+    def test_get_mistral_key_success(self, service, workspace_id):
+        """Test retrieving a Mistral API key."""
+        plaintext_key = "msk_test_mistral_key_12345678901234567890"
+
+        service.add_key(workspace_id, "mistral", plaintext_key, validate=False)
+        retrieved_key = service.get_key(workspace_id, "mistral")
+
+        assert retrieved_key == plaintext_key
+
+    def test_mask_mistral_key(self, service):
+        """Test key masking for Mistral keys."""
+        key = "msk_abcdefghijklmnopqrstuvwxyz1234"
+        masked = service.mask_key(key)
+
+        assert masked == "msk_***...1234"
+        assert "abcdefghijklmnopqrstuvwxyz" not in masked
+
+    def test_validate_mistral_key_invalid(self, service):
+        """Test validating an invalid Mistral API key."""
+        is_valid, message = service.validate_key("mistral", "msk_invalid_key_12345")
+
+        assert is_valid is False
+        # Can be either "not installed" or "invalid" depending on whether SDK is available
+        assert any(word in message.lower() for word in ["fail", "invalid", "not installed", "install"])
+
+    @pytest.mark.skipif(
+        not os.getenv("MISTRAL_API_KEY"),
+        reason="MISTRAL_API_KEY not set - skipping live API test"
+    )
+    def test_validate_mistral_key_valid(self, service):
+        """Test validating a valid Mistral API key (requires real key)."""
+        api_key = os.getenv("MISTRAL_API_KEY")
+        is_valid, message = service.validate_key("mistral", api_key)
+
+        assert is_valid is True
+        assert "valid" in message.lower() or "authenticated" in message.lower()
+
+    def test_add_mistral_key_with_validation_invalid_raises_error(self, service, workspace_id):
+        """Test that adding Mistral key with validation=True rejects invalid keys."""
+        with pytest.raises(ValueError, match="validation failed"):
+            service.add_key(
+                workspace_id=workspace_id,
+                provider="mistral",
+                plaintext_key="msk_invalid_key_12345",
+                validate=True
+            )
+
+    def test_update_mistral_key_success(self, service, workspace_id):
+        """Test updating a Mistral API key."""
+        old_key = "msk_old_key_12345678901234567890"
+        new_key = "msk_new_key_98765432109876543210"
+
+        service.add_key(workspace_id, "mistral", old_key, validate=False)
+        service.update_key(workspace_id, "mistral", new_key, validate=False)
+
+        retrieved = service.get_key(workspace_id, "mistral")
+        assert retrieved == new_key
+
+
+class TestOllamaProviderSupport:
+    """Test Ollama provider support (Issue #119)."""
+
+    def test_add_ollama_connection_success(self, service, workspace_id):
+        """Test adding Ollama connection string (no API key needed for local)."""
+        connection_string = "http://localhost:11434"
+
+        user_api_key = service.add_key(
+            workspace_id=workspace_id,
+            provider="ollama",
+            plaintext_key=connection_string,
+            validate=False
+        )
+
+        assert user_api_key.provider == "ollama"
+        assert user_api_key.encrypted_key != connection_string
+        assert user_api_key.is_active is True
+
+    def test_get_ollama_connection_success(self, service, workspace_id):
+        """Test retrieving Ollama connection string."""
+        connection_string = "http://localhost:11434"
+
+        service.add_key(workspace_id, "ollama", connection_string, validate=False)
+        retrieved = service.get_key(workspace_id, "ollama")
+
+        assert retrieved == connection_string
+
+    def test_mask_ollama_connection(self, service):
+        """Test masking Ollama connection strings."""
+        connection = "http://localhost:11434"
+        masked = service.mask_key(connection)
+
+        # URLs don't have a prefix separator, so they'll be masked as ***...1434
+        assert masked == "***...1434"
+        assert "localhost" not in masked
+
+    def test_validate_ollama_connection_invalid(self, service):
+        """Test validating an invalid Ollama connection."""
+        is_valid, message = service.validate_key("ollama", "http://invalid-host:99999")
+
+        assert is_valid is False
+        assert any(word in message.lower() for word in ["fail", "connection", "connect"])
+
+    def test_validate_ollama_connection_valid_with_running_instance(self, service):
+        """Test validating Ollama connection when instance is running (integration test)."""
+        # This test will skip if Ollama is not running locally
+        try:
+            import httpx
+            response = httpx.get("http://localhost:11434/api/tags", timeout=2.0)
+            ollama_running = response.status_code == 200
+        except:
+            ollama_running = False
+
+        if not ollama_running:
+            pytest.skip("Ollama not running on localhost:11434")
+
+        is_valid, message = service.validate_key("ollama", "http://localhost:11434")
+        assert is_valid is True
+        assert "valid" in message.lower() or "connected" in message.lower()
+
+    def test_add_ollama_with_validation_invalid_raises_error(self, service, workspace_id):
+        """Test that adding Ollama connection with validation=True rejects invalid connections."""
+        with pytest.raises(ValueError, match="validation failed"):
+            service.add_key(
+                workspace_id=workspace_id,
+                provider="ollama",
+                plaintext_key="http://invalid-host:99999",
+                validate=True
+            )
+
+    def test_update_ollama_connection_success(self, service, workspace_id):
+        """Test updating Ollama connection string."""
+        old_connection = "http://localhost:11434"
+        new_connection = "http://192.168.1.100:11434"
+
+        service.add_key(workspace_id, "ollama", old_connection, validate=False)
+        service.update_key(workspace_id, "ollama", new_connection, validate=False)
+
+        retrieved = service.get_key(workspace_id, "ollama")
+        assert retrieved == new_connection
+
+    def test_ollama_supports_custom_ports(self, service, workspace_id):
+        """Test that Ollama supports custom ports and hosts."""
+        custom_connections = [
+            "http://localhost:11434",
+            "http://127.0.0.1:11434",
+            "http://192.168.1.100:8080",
+            "https://ollama.example.com:443"
+        ]
+
+        for i, connection in enumerate(custom_connections):
+            ws_id = f"{workspace_id}-{i}"
+            user_api_key = service.add_key(
+                workspace_id=ws_id,
+                provider="ollama",
+                plaintext_key=connection,
+                validate=False
+            )
+            assert user_api_key.provider == "ollama"
+            retrieved = service.get_key(ws_id, "ollama")
+            assert retrieved == connection
+
+
+class TestMultiProviderSupport:
+    """Test handling multiple providers in the same workspace."""
+
+    def test_add_all_providers_in_same_workspace(self, service, workspace_id):
+        """Test adding all supported providers (including new ones) to same workspace."""
+        providers_and_keys = {
+            "anthropic": "sk-ant-test-key-12345",
+            "openai": "sk-proj-test-key-67890",
+            "cohere": "co-test-key-abcde",
+            "huggingface": "hf_test_key_fghij",
+            "google": "AIza-test-key-klmno",
+            "groq": "gsk_test_key_12345",
+            "mistral": "msk_test_key_67890",
+            "ollama": "http://localhost:11434"
+        }
+
+        for provider, key in providers_and_keys.items():
+            service.add_key(workspace_id, provider, key, validate=False)
+
+        # Verify all keys were added
+        keys = service.list_keys(workspace_id)
+        assert len(keys) == 8
+
+        providers_in_db = {key.provider for key in keys}
+        assert providers_in_db == set(providers_and_keys.keys())
+
+    def test_get_specific_provider_from_multi_provider_workspace(self, service, workspace_id):
+        """Test retrieving specific provider keys from workspace with multiple providers."""
+        service.add_key(workspace_id, "groq", "gsk_test_key_12345", validate=False)
+        service.add_key(workspace_id, "mistral", "msk_test_key_67890", validate=False)
+        service.add_key(workspace_id, "ollama", "http://localhost:11434", validate=False)
+
+        groq_key = service.get_key(workspace_id, "groq")
+        mistral_key = service.get_key(workspace_id, "mistral")
+        ollama_connection = service.get_key(workspace_id, "ollama")
+
+        assert groq_key == "gsk_test_key_12345"
+        assert mistral_key == "msk_test_key_67890"
+        assert ollama_connection == "http://localhost:11434"
