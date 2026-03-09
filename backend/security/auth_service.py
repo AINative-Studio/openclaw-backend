@@ -221,11 +221,27 @@ class AuthService:
 
             if not user:
                 # Auto-create user from AINative authentication
+                # Get or create default workspace
+                from backend.models.workspace import Workspace
+                workspace_result = await db.execute(select(Workspace).limit(1))
+                workspace = workspace_result.scalars().first()
+
+                if not workspace:
+                    # Create default workspace if none exists
+                    workspace = Workspace(
+                        name="Default Workspace",
+                        comment="Auto-created default workspace"
+                    )
+                    db.add(workspace)
+                    await db.flush()  # Flush to get workspace.id
+
+                # Create user with workspace and hashed password
                 user = User(
                     email=ainative_data["email"],
                     full_name=ainative_data["full_name"],
                     is_active=True,
-                    password_hash=None  # No local password for AINative users
+                    password_hash=AuthService.hash_password(password),  # Hash the password
+                    workspace_id=workspace.id  # Required field
                 )
                 db.add(user)
                 await db.commit()

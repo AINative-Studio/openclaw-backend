@@ -155,6 +155,12 @@ def _register_routers() -> None:
     prefix = "/api/v1"
 
     try:
+        from backend.api.v1.endpoints.auth import router as auth_router
+        app.include_router(auth_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: auth router not loaded: {e}")
+
+    try:
         from backend.api.v1.endpoints.agent_lifecycle import router as agent_router
         app.include_router(agent_router, prefix=prefix)
     except Exception as e:

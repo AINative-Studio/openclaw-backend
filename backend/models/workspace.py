@@ -6,11 +6,12 @@ Provides organizational boundary for multi-tenant architecture with ZeroDB integ
 """
 
 from sqlalchemy import Column, String, Text, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from uuid import uuid4
 from backend.db.base_class import Base
 from sqlalchemy.sql import func
+import sqlalchemy as sa
 
 
 class Workspace(Base):
@@ -24,9 +25,10 @@ class Workspace(Base):
 
     # Primary identification
     id = Column(UUID(), primary_key=True, default=uuid4)
-    name = Column(String(255), nullable=False, unique=True, index=True)
-    slug = Column(String(255), nullable=False, unique=True, index=True)
-    description = Column(Text, nullable=True)
+    name = Column(Text, nullable=True)
+    comment = Column(Text, nullable=True)
+    meta = Column(sa.JSON, nullable=True)
+    config = Column(sa.JSON, nullable=True)
 
     # ZeroDB integration
     zerodb_project_id = Column(String(255), nullable=True, unique=True, index=True)
@@ -42,4 +44,4 @@ class Workspace(Base):
     conversations = relationship("Conversation", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Workspace {self.name} ({self.slug})>"
+        return f"<Workspace {self.name} ({self.id})>"
