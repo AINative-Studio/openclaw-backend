@@ -4,7 +4,7 @@ database:
   username: ${PGUSER}
   password: ${PGPASSWORD}
   app_db_name: railway
-  sys_db_name: railway
+  sys_db_name: openclaw_gateway_dbos_sys
   app_db_client: knex
   migrate: []
   rollback: []
@@ -14,4 +14,7 @@ runtimeConfig:
   entrypoints:
     - dist/workflows/agent-lifecycle-workflow.js
     - dist/workflows/agent-message-workflow.js
-  port: 18790
+    - dist/workflows/chat-workflow.js
+    - dist/workflows/skill-execution-workflow.js
+    - dist/workflows/skill-installation-workflow.js
+  port: 18789

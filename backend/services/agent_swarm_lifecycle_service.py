@@ -14,15 +14,19 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 
-from app.models.agent_swarm_lifecycle import (
+from backend.models.agent_swarm_lifecycle import (
     AgentSwarmInstance,
     AgentSwarmStatus,
     HeartbeatInterval,
     AgentHeartbeatExecution,
     HeartbeatExecutionStatus
 )
-from app.schemas.agent_swarm_lifecycle import (
+from backend.models.workspace import Workspace
+from backend.models.conversation import Conversation, ConversationStatus
+from backend.personality import PersonalityManager
+from backend.schemas.agent_swarm_lifecycle import (
     AgentProvisionRequest,
     AgentUpdateSettingsRequest,
     AgentProvisionResponse,
@@ -30,16 +34,24 @@ from app.schemas.agent_swarm_lifecycle import (
     AgentStatusResponse,
     HeartbeatExecutionResponse,
 )
+from backend.integrations.zerodb_client import ZeroDBClient
 
 # Initialize logger first
 logger = logging.getLogger(__name__)
 
 # Optional import - OpenClaw integration may not be available
 try:
-    from app.agents.orchestration.production_openclaw_bridge import ProductionOpenClawBridge
+    from backend.agents.orchestration.production_openclaw_bridge import ProductionOpenClawBridge
 except ImportError:
     ProductionOpenClawBridge = None
     logger.warning("ProductionOpenClawBridge not available - OpenClaw integration disabled")
+
+# Optional import - ConversationService for context loading
+try:
+    from backend.services.conversation_service import ConversationService
+except ImportError:
+    ConversationService = None
+    logger.warning("ConversationService not available - conversation context disabled")
 
 
 class AgentSwarmLifecycleService:
@@ -54,14 +66,16 @@ class AgentSwarmLifecycleService:
     - Error tracking and recovery
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, zerodb_client: Optional[ZeroDBClient] = None):
         """
         Initialize lifecycle service
 
         Args:
             db: Database session
+            zerodb_client: ZeroDBClient instance for workspace management
         """
         self.db = db
+        self.zerodb_client = zerodb_client
         self.openclaw_bridge = None
 
         # Initialize OpenClaw bridge if configured and available
@@ -77,6 +91,49 @@ class AgentSwarmLifecycleService:
                 logger.info("OpenClaw bridge initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenClaw bridge: {e}")
+
+    async def _get_or_create_default_workspace(self) -> Workspace:
+        """
+        Get or create default workspace
+
+        Returns:
+            Default workspace instance
+
+        Raises:
+            ValueError: If zerodb_client not configured
+        """
+        if not self.zerodb_client:
+            raise ValueError("ZeroDBClient not configured - cannot create workspace")
+
+        # Check if default workspace exists
+        result = self.db.execute(
+            select(Workspace).where(Workspace.slug == "default")
+        )
+        workspace = result.scalar_one_or_none()
+
+        if not workspace:
+            # Create ZeroDB project
+            project = await self.zerodb_client.create_project(
+                name="Default Workspace",
+                description="Auto-created default workspace"
+            )
+
+            # Create workspace record
+            workspace = Workspace(
+                name="Default Workspace",
+                slug="default",
+                zerodb_project_id=project["project_id"]
+            )
+            self.db.add(workspace)
+            self.db.commit()
+            self.db.refresh(workspace)
+
+            logger.info(
+                f"Created default workspace with ZeroDB project {project['project_id']}",
+                extra={"workspace_id": str(workspace.id), "zerodb_project_id": project["project_id"]}
+            )
+
+        return workspace
 
     def create_agent(
         self,
@@ -150,20 +207,41 @@ class AgentSwarmLifecycleService:
             }
         )
 
+        # Initialize personality files for the agent
+        try:
+            personality_manager = PersonalityManager()
+            personality_manager.initialize_agent_personality(
+                agent_id=str(agent.id),
+                agent_name=agent.name,
+                model=agent.model,
+                persona=agent.persona
+            )
+            logger.info(
+                f"Initialized personality files for agent {agent.name}",
+                extra={"agent_id": str(agent.id)}
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to initialize personality files for agent {agent.name}: {e}",
+                extra={"agent_id": str(agent.id), "error": str(e)}
+            )
+            # Don't fail agent creation if personality initialization fails
+
         return agent
 
-    async def provision_agent(self, agent_id: UUID) -> AgentStatusResponse:
+    async def provision_agent(self, agent_id: UUID, conversation_id: Optional[UUID] = None) -> AgentStatusResponse:
         """
         Provision agent by registering with OpenClaw
 
         Args:
             agent_id: Agent instance ID
+            conversation_id: Optional conversation ID to attach to agent
 
         Returns:
             Agent status response
 
         Raises:
-            ValueError: If agent not found or in wrong state
+            ValueError: If agent not found or in wrong state, or conversation validation fails
             ConnectionError: If OpenClaw connection fails
         """
         agent = self.db.query(AgentSwarmInstance).filter(
@@ -172,6 +250,37 @@ class AgentSwarmLifecycleService:
 
         if not agent:
             raise ValueError(f"Agent {agent_id} not found")
+
+        # Validate and attach conversation if provided
+        if conversation_id is not None:
+            conversation = self.db.query(Conversation).filter(
+                Conversation.id == conversation_id
+            ).first()
+
+            if not conversation:
+                raise ValueError(f"Conversation {conversation_id} not found")
+
+            # Validate conversation belongs to same workspace
+            if conversation.workspace_id != agent.workspace_id:
+                raise ValueError("Conversation does not belong to agent's workspace")
+
+            # Attach conversation
+            agent.current_conversation_id = conversation_id
+            logger.info(
+                f"Attached conversation {conversation_id} to agent {agent_id}",
+                extra={"agent_id": str(agent_id), "conversation_id": str(conversation_id)}
+            )
+
+        # Ensure agent has workspace - auto-create default if missing
+        if not agent.workspace_id:
+            workspace = await self._get_or_create_default_workspace()
+            agent.workspace_id = workspace.id
+            self.db.commit()
+            self.db.refresh(agent)
+            logger.info(
+                f"Assigned default workspace to agent {agent.id}",
+                extra={"agent_id": str(agent.id), "workspace_id": str(workspace.id)}
+            )
 
         # Allow provisioning if already running (idempotency)
         if agent.status == AgentSwarmStatus.RUNNING:
@@ -187,19 +296,40 @@ class AgentSwarmLifecycleService:
             raise ValueError(f"Cannot provision agent in {agent.status} state")
 
         try:
+            # Create or reinitialize bridge with db and zerodb_client
+            openclaw_url = os.getenv("OPENCLAW_GATEWAY_URL")
+            openclaw_token = os.getenv("OPENCLAW_AUTH_TOKEN")
+
+            if ProductionOpenClawBridge and openclaw_url and openclaw_token:
+                # Inject db and zerodb_client into bridge
+                self.openclaw_bridge = ProductionOpenClawBridge(
+                    url=openclaw_url,
+                    token=openclaw_token,
+                    db=self.db,
+                    zerodb_client=self.zerodb_client
+                )
+
             # Connect to OpenClaw if not connected
             if self.openclaw_bridge and not self.openclaw_bridge.is_connected:
                 await self.openclaw_bridge.connect()
 
-            # Build provisioning message
-            provisioning_message = self._build_provisioning_message(agent)
+            # Load conversation context if conversation attached
+            conversation_context = []
+            if agent.current_conversation_id:
+                conversation_context = await self._load_conversation_context(agent.current_conversation_id)
 
-            # Send to OpenClaw
+            # Build provisioning message with conversation context
+            provisioning_message = self._build_provisioning_message(agent, conversation_context)
+
+            # Send to OpenClaw with context
             if self.openclaw_bridge:
                 result = await self.openclaw_bridge.send_to_agent(
                     session_key=agent.openclaw_session_key,
                     message=provisioning_message,
-                    metadata={"type": "provisioning", "agent_id": str(agent.id)}
+                    metadata={"type": "provisioning", "agent_id": str(agent.id)},
+                    agent_id=agent.id,
+                    user_id=agent.user_id,
+                    workspace_id=agent.workspace_id
                 )
 
                 # Update agent status
@@ -391,12 +521,15 @@ class AgentSwarmLifecycleService:
             # Build heartbeat message
             heartbeat_message = self._build_heartbeat_message(agent)
 
-            # Execute heartbeat via OpenClaw
+            # Execute heartbeat via OpenClaw with context
             if self.openclaw_bridge:
                 result = await self.openclaw_bridge.send_to_agent(
                     session_key=agent.openclaw_session_key,
                     message=heartbeat_message,
-                    metadata={"type": "heartbeat", "execution_id": str(execution.id)}
+                    metadata={"type": "heartbeat", "execution_id": str(execution.id)},
+                    agent_id=agent.id,
+                    user_id=agent.user_id,
+                    workspace_id=agent.workspace_id
                 )
             else:
                 # Mock execution if OpenClaw not available
@@ -597,12 +730,13 @@ class AgentSwarmLifecycleService:
         delta = interval_mapping.get(interval, timedelta(minutes=15))
         return now + delta
 
-    def _build_provisioning_message(self, agent: AgentSwarmInstance) -> str:
+    def _build_provisioning_message(self, agent: AgentSwarmInstance, conversation_context: List = None) -> str:
         """
         Build provisioning message for OpenClaw
 
         Args:
             agent: Agent instance
+            conversation_context: Optional conversation history messages
 
         Returns:
             Provisioning message text
@@ -617,6 +751,15 @@ class AgentSwarmLifecycleService:
 
         if agent.heartbeat_enabled:
             message += f"\nHeartbeat: Enabled ({agent.heartbeat_interval})\n"
+
+        # Include conversation context if available
+        if conversation_context:
+            message += f"\n--- Conversation History ({len(conversation_context)} messages) ---\n\n"
+            for msg in conversation_context:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                message += f"{role}: {content}\n"
+            message += "\n--- End Conversation History ---\n"
 
         return message
 
@@ -637,3 +780,165 @@ class AgentSwarmLifecycleService:
                 message += f"{idx}. {task}\n"
 
         return message
+
+    async def _load_conversation_context(self, conversation_id: UUID) -> List:
+        """
+        Load last 10 messages from conversation for context
+
+        Args:
+            conversation_id: Conversation UUID
+
+        Returns:
+            List of message dictionaries (max 10, most recent first)
+        """
+        try:
+            if not ConversationService or not self.zerodb_client:
+                logger.warning("ConversationService or ZeroDB client not available - skipping context load")
+                return []
+
+            # Create async session wrapper for ConversationService
+            from sqlalchemy.ext.asyncio import AsyncSession
+            from backend.db.base import async_session_maker
+
+            async with async_session_maker() as async_db:
+                conversation_service = ConversationService(db=async_db, zerodb_client=self.zerodb_client)
+                messages = await conversation_service.get_messages(
+                    conversation_id=conversation_id,
+                    limit=10,
+                    offset=0
+                )
+                return messages
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load conversation context for {conversation_id}: {e}",
+                extra={"conversation_id": str(conversation_id), "error": str(e)}
+            )
+            # Graceful degradation - return empty list
+            return []
+
+    def update_agent_state(self, agent_id: UUID) -> dict:
+        """
+        Get agent state including conversation_id
+
+        Args:
+            agent_id: Agent instance ID
+
+        Returns:
+            Dictionary with agent state information
+        """
+        agent = self.db.query(AgentSwarmInstance).filter(
+            AgentSwarmInstance.id == agent_id
+        ).first()
+
+        if not agent:
+            return None
+
+        return {
+            "id": str(agent.id),
+            "name": agent.name,
+            "status": agent.status.value if agent.status else None,
+            "conversation_id": str(agent.current_conversation_id) if agent.current_conversation_id else None,
+            "workspace_id": str(agent.workspace_id) if agent.workspace_id else None,
+            "updated_at": agent.updated_at.isoformat() if agent.updated_at else None
+        }
+
+    async def get_agent_conversation_summary(self, agent_id: UUID) -> Optional[dict]:
+        """
+        Get conversation summary for agent
+
+        Args:
+            agent_id: Agent instance ID
+
+        Returns:
+            Conversation summary dict or None if no conversation
+
+        Raises:
+            ValueError: If agent not found
+        """
+        agent = self.db.query(AgentSwarmInstance).filter(
+            AgentSwarmInstance.id == agent_id
+        ).first()
+
+        if not agent:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        if not agent.current_conversation_id:
+            return None
+
+        # Get conversation details
+        conversation = self.db.query(Conversation).filter(
+            Conversation.id == agent.current_conversation_id
+        ).first()
+
+        if not conversation:
+            logger.warning(
+                f"Agent {agent_id} references non-existent conversation {agent.current_conversation_id}",
+                extra={"agent_id": str(agent_id), "conversation_id": str(agent.current_conversation_id)}
+            )
+            return None
+
+        return {
+            "conversation_id": str(conversation.id),
+            "message_count": conversation.message_count,
+            "status": conversation.status.value if hasattr(conversation.status, 'value') else str(conversation.status),
+            "started_at": conversation.started_at.isoformat() if conversation.started_at else None,
+            "last_message_at": conversation.last_message_at.isoformat() if conversation.last_message_at else None,
+        }
+
+    async def switch_agent_conversation(self, agent_id: UUID, new_conversation_id: Optional[UUID]) -> AgentSwarmInstance:
+        """
+        Switch agent to a different conversation
+
+        Args:
+            agent_id: Agent instance ID
+            new_conversation_id: New conversation ID (or None to clear)
+
+        Returns:
+            Updated agent instance
+
+        Raises:
+            ValueError: If agent not found, conversation not found, or invalid state
+        """
+        agent = self.db.query(AgentSwarmInstance).filter(
+            AgentSwarmInstance.id == agent_id
+        ).first()
+
+        if not agent:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        # Validate agent is in a state where conversation can be switched
+        if agent.status not in [AgentSwarmStatus.RUNNING, AgentSwarmStatus.PAUSED]:
+            raise ValueError(f"Cannot switch conversation for agent in {agent.status} state")
+
+        # Validate new conversation exists if provided
+        if new_conversation_id is not None:
+            conversation = self.db.query(Conversation).filter(
+                Conversation.id == new_conversation_id
+            ).first()
+
+            if not conversation:
+                raise ValueError(f"Conversation {new_conversation_id} not found")
+
+            # Validate conversation belongs to same workspace
+            if conversation.workspace_id != agent.workspace_id:
+                raise ValueError("Conversation does not belong to agent's workspace")
+
+        # Store old conversation for logging
+        old_conversation_id = agent.current_conversation_id
+
+        # Switch conversation
+        agent.current_conversation_id = new_conversation_id
+        self.db.commit()
+        self.db.refresh(agent)
+
+        logger.info(
+            f"Agent {agent.name} switched conversation from {old_conversation_id} to {new_conversation_id}",
+            extra={
+                "agent_id": str(agent_id),
+                "old_conversation_id": str(old_conversation_id) if old_conversation_id else None,
+                "new_conversation_id": str(new_conversation_id) if new_conversation_id else None
+            }
+        )
+
+        return agent

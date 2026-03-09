@@ -6,21 +6,30 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
-    "dev": "tsc && node dist/server.js",
-    "clean": "rm -rf dist"
+    "start": "node validate-config.js && node dist/server.js",
+    "dev": "tsc && node validate-config.js && node dist/server.js",
+    "clean": "rm -rf dist",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+    "validate": "node validate-config.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@dbos-inc/dbos-sdk": "^4.9.11",
+    "axios": "^1.13.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.13",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
 }
