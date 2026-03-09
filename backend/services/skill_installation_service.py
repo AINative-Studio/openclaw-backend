@@ -2,12 +2,22 @@
 Skill Installation Service
 
 Handles installation of CLI-based skills via go install and npm install.
+
+SECURITY: Uses secure path validation to prevent path traversal attacks (Issue #129).
 """
 import asyncio
 import logging
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 from enum import Enum
+
+from backend.utils.file_security import (
+    validate_file_path,
+    validate_npm_package_name,
+    validate_go_package_path,
+    PathTraversalError,
+    InvalidFilenameError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -249,19 +259,30 @@ class SkillInstallationService:
 
             # Step 2: Find and parse SKILL.md
             logs.append(f"Step 2: Reading skill metadata from SKILL.md...")
+
+            # SECURITY: Validate NPM package name to prevent path traversal
+            try:
+                validate_npm_package_name(neuro_package)
+            except InvalidFilenameError as e:
+                logs.append(f"Security Error: Invalid NPM package name: {e}")
+                return InstallResult(
+                    success=False,
+                    message=f"Invalid NPM package name: {e}",
+                    logs=logs,
+                    method=InstallMethod.NPM,
+                    package=neuro_package
+                )
+
             npm_global_prefix = os.path.expanduser("~/.npm-global")
             if not os.path.exists(npm_global_prefix):
                 # Try Homebrew location
                 npm_global_prefix = "/opt/homebrew/lib"
 
-            skill_md_path = os.path.join(
-                npm_global_prefix,
-                "node_modules",
-                neuro_package,
-                "SKILL.md"
-            )
+            # Construct path safely
+            from pathlib import Path
+            skill_md_path = Path(npm_global_prefix) / "node_modules" / neuro_package / "SKILL.md"
 
-            if not os.path.exists(skill_md_path):
+            if not skill_md_path.exists():
                 logs.append(f"Warning: SKILL.md not found at {skill_md_path}")
                 logs.append("Skill config installed, but actual CLI binary may need manual installation")
                 return InstallResult(
@@ -386,10 +407,24 @@ class SkillInstallationService:
 
         Returns:
             InstallResult with success status and logs
+
+        Security:
+            Validates Go package path to prevent command injection and path traversal
         """
         logs: List[str] = []
 
         try:
+            # SECURITY: Validate Go package path format
+            try:
+                validate_go_package_path(package_path)
+            except InvalidFilenameError as e:
+                return InstallResult(
+                    success=False,
+                    message=f"Invalid Go package path: {e}",
+                    logs=[f"Security validation failed: {e}"],
+                    method=InstallMethod.GO,
+                    package=package_path
+                )
             # Check if go is installed
             check_cmd = ["go", "version"]
             check_process = await asyncio.create_subprocess_exec(
@@ -493,10 +528,24 @@ class SkillInstallationService:
 
         Returns:
             InstallResult with success status and logs
+
+        Security:
+            Validates NPM package name to prevent path traversal and command injection
         """
         logs: List[str] = []
 
         try:
+            # SECURITY: Validate NPM package name format
+            try:
+                validate_npm_package_name(package_name)
+            except InvalidFilenameError as e:
+                return InstallResult(
+                    success=False,
+                    message=f"Invalid NPM package name: {e}",
+                    logs=[f"Security validation failed: {e}"],
+                    method=InstallMethod.NPM,
+                    package=package_name
+                )
             # Check if npm is installed
             check_cmd = ["npm", "--version"]
             check_process = await asyncio.create_subprocess_exec(

@@ -12,6 +12,8 @@ Supported OpenClaw plugins:
 - @openclaw/signal
 
 Note: Email and SMS are custom backends, NOT OpenClaw plugins.
+
+SECURITY: Uses path validation to prevent directory traversal attacks (Issue #129).
 """
 
 import json
@@ -21,6 +23,11 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
+
+from backend.utils.file_security import (
+    validate_config_directory,
+    PathTraversalError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +96,26 @@ class OpenClawPluginService:
         Args:
             config_dir: Configuration directory (default ~/.openclaw)
             openclaw_bin: OpenClaw CLI binary path (default 'openclaw')
+
+        Raises:
+            PathTraversalError: If config_dir is not in whitelist
         """
         # Configuration directory
         if config_dir:
-            self.config_dir = config_dir
+            # SECURITY: Validate config directory is in whitelist
+            try:
+                self.config_dir = validate_config_directory(config_dir)
+            except PathTraversalError as e:
+                logger.error(f"Invalid config directory: {e}")
+                raise
         else:
             self.config_dir = Path.home() / ".openclaw"
+            # Validate default directory too
+            try:
+                self.config_dir = validate_config_directory(self.config_dir)
+            except PathTraversalError as e:
+                logger.error(f"Default config directory not in whitelist: {e}")
+                raise
 
         self.config_file = self.config_dir / "openclaw.json"
         self.openclaw_bin = openclaw_bin
