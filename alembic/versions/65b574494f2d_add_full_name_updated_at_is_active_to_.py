@@ -19,16 +19,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema: Add full_name, updated_at, and is_active columns to users table."""
-    # Add full_name column (nullable string)
-    op.add_column('users', sa.Column('full_name', sa.String(length=255), nullable=True))
+    """Upgrade schema: Add full_name, updated_at, and is_active columns to users table (idempotent)."""
+    from sqlalchemy import inspect
 
-    # Add updated_at column (nullable datetime with timezone, auto-updated on modification)
-    op.add_column('users', sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True))
+    # Get connection and check which columns already exist
+    connection = op.get_bind()
+    inspector = inspect(connection)
+    existing_columns = {col['name'] for col in inspector.get_columns('users')}
 
-    # Add is_active column (boolean, default True, not nullable)
-    # For existing rows, we set default to True
-    op.add_column('users', sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text('true')))
+    # Add full_name column if it doesn't exist
+    if 'full_name' not in existing_columns:
+        op.add_column('users', sa.Column('full_name', sa.String(length=255), nullable=True))
+
+    # Add updated_at column if it doesn't exist
+    if 'updated_at' not in existing_columns:
+        op.add_column('users', sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True))
+
+    # Add is_active column if it doesn't exist (boolean, default True, not nullable)
+    if 'is_active' not in existing_columns:
+        op.add_column('users', sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text('true')))
 
 
 def downgrade() -> None:

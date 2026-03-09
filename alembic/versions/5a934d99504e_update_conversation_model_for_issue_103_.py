@@ -34,7 +34,20 @@ def upgrade() -> None:
     - Remove old OpenClaw/ZeroDB fields
     - Add composite unique index on (channel, channel_conversation_id)
     """
-    # Drop old OpenClaw-specific fields
+    # Add new required channel fields (nullable first, then populate defaults)
+    # Do this BEFORE dropping old columns so we can use them as defaults
+    op.add_column('conversations', sa.Column('channel', sa.String(length=50), nullable=True))
+    op.add_column('conversations', sa.Column('channel_conversation_id', sa.String(length=255), nullable=True))
+
+    # Populate default values for existing rows (using old openclaw_session_key before it's dropped)
+    op.execute("UPDATE conversations SET channel = 'whatsapp' WHERE channel IS NULL")
+    op.execute("UPDATE conversations SET channel_conversation_id = COALESCE(openclaw_session_key, id::text) WHERE channel_conversation_id IS NULL")
+
+    # Now make them NOT NULL
+    op.alter_column('conversations', 'channel', nullable=False)
+    op.alter_column('conversations', 'channel_conversation_id', nullable=False)
+
+    # Drop old OpenClaw-specific fields (after we've used them for defaults)
     op.drop_column('conversations', 'openclaw_session_key')
     op.drop_column('conversations', 'zerodb_table_name')
     op.drop_column('conversations', 'zerodb_conversation_row_id')
@@ -48,14 +61,22 @@ def upgrade() -> None:
                     existing_type=sa.dialects.postgresql.UUID(),
                     nullable=True)
 
-    # Make user_id NOT NULL
+    # Make user_id NOT NULL (populate default for any NULL values)
+    # Use workspace_id as a fallback for user_id if NULL
+    op.execute("""
+        UPDATE conversations
+        SET user_id = workspace_id
+        WHERE user_id IS NULL AND workspace_id IS NOT NULL
+    """)
+    # For any remaining NULLs, use a default UUID (should not happen in practice)
+    op.execute("""
+        UPDATE conversations
+        SET user_id = '00000000-0000-0000-0000-000000000000'::uuid
+        WHERE user_id IS NULL
+    """)
     op.alter_column('conversations', 'user_id',
                     existing_type=sa.dialects.postgresql.UUID(),
                     nullable=False)
-
-    # Add new required channel fields
-    op.add_column('conversations', sa.Column('channel', sa.String(length=50), nullable=False))
-    op.add_column('conversations', sa.Column('channel_conversation_id', sa.String(length=255), nullable=False))
 
     # Add optional fields
     op.add_column('conversations', sa.Column('title', sa.String(length=500), nullable=True))
