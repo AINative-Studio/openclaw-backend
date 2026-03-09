@@ -50,6 +50,12 @@ def _register_routers() -> None:
         print(f"Warning: agent_lifecycle router not loaded: {e}")
 
     try:
+        from backend.api.v1.endpoints.agent_personality import router as personality_router
+        app.include_router(personality_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: agent_personality router not loaded: {e}")
+
+    try:
         from backend.api.v1.endpoints.agent_swarm import router as swarm_router
         app.include_router(swarm_router, prefix=prefix)
     except Exception as e:
@@ -102,6 +108,12 @@ def _register_routers() -> None:
         app.include_router(template_router, prefix=prefix)
     except Exception as e:
         print(f"Warning: agent_template router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.skill_installation_audit import router as skill_audit_router
+        app.include_router(skill_audit_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: skill_installation_audit router not loaded: {e}")
 
     try:
         from backend.api.v1.endpoints.workspace_settings import router as workspace_settings_router
@@ -184,11 +196,25 @@ def _register_routers() -> None:
         print(f"Warning: agent_channels router not loaded: {e}")
 
     try:
+        from backend.api.v1.endpoints.zalo import router as zalo_router
+        app.include_router(zalo_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: zalo router not loaded: {e}")
+
+    try:
         from backend.api.v1.endpoints.openclaw_channels import router as openclaw_channels_router
         app.include_router(openclaw_channels_router, prefix=prefix)
     except Exception as e:
         print(f"Warning: openclaw_channels router not loaded: {e}")
 
+
+    # Legacy compatibility routes (DISABLED - causing redirect loop)
+    # TODO: Re-enable with proper path exclusion if needed
+    # try:
+    #     from backend.api.v1.endpoints.legacy_routes import router as legacy_router
+    #     app.include_router(legacy_router)  # NO PREFIX - proxies to /api/v1
+    # except Exception as e:
+    #     print(f"Warning: legacy_routes router not loaded: {e}")
 _register_routers()
 
 
@@ -303,3 +329,23 @@ async def startup():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def root_metrics():
+    """
+    Root-level /metrics endpoint for Prometheus scraping.
+
+    This endpoint is provided at the root level (without /api/v1 prefix)
+    for compatibility with Prometheus and other monitoring tools that
+    expect metrics at the conventional /metrics path.
+    """
+    from fastapi.responses import Response
+    from backend.services.prometheus_metrics_service import get_metrics_service
+
+    PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+    service = get_metrics_service()
+    service.collect_service_stats()
+    content = service.generate_metrics()
+    return Response(content=content, media_type=PROMETHEUS_CONTENT_TYPE)

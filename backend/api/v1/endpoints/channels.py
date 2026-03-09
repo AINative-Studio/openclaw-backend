@@ -19,7 +19,7 @@ from backend.schemas.channel_schemas import (
 
 logger = logging.getLogger(__name__)
 
-# Try to import service with graceful fallback
+# Try to import gateway proxy service with graceful fallback
 try:
     from backend.services.openclaw_gateway_proxy_service import (
         get_gateway_proxy_service,
@@ -30,6 +30,19 @@ try:
 except ImportError as e:
     logger.error(f"Failed to import OpenClawGatewayProxyService: {e}")
     GATEWAY_PROXY_AVAILABLE = False
+
+# Try to import plugin service with graceful fallback (Issue #98)
+try:
+    from backend.services.openclaw_plugin_service import (
+        get_openclaw_plugin_service,
+        PluginNotFoundError,
+        PluginConfigurationError,
+        PluginCLIError
+    )
+    PLUGIN_SERVICE_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"Failed to import OpenClawPluginService: {e}")
+    PLUGIN_SERVICE_AVAILABLE = False
 
 
 router = APIRouter()
@@ -288,4 +301,203 @@ async def update_channel_config(channel_id: str, request: ChannelConfigRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update channel config: {str(e)}"
+        )
+
+
+# ============================================================================
+# NEW ENDPOINTS (Issue #98): OpenClaw Plugin Integration
+# ============================================================================
+
+
+@router.post(
+    "/channels/{channel_id}/connect",
+    response_model=ChannelResponse,
+    status_code=status.HTTP_201_CREATED
+)
+async def connect_channel(channel_id: str, request: ChannelConfigRequest):
+    """
+    Connect a channel via OpenClaw plugin (Issue #98).
+
+    This endpoint enables and configures OpenClaw plugins for:
+    - Telegram (@openclaw/telegram)
+    - Discord (@openclaw/discord)
+    - Slack (@openclaw/slack)
+    - Microsoft Teams (@openclaw/msteams)
+    - Signal (@openclaw/signal)
+
+    Args:
+        channel_id: Channel identifier
+        request: Channel configuration (botToken, appToken, etc.)
+
+    Returns:
+        ChannelResponse: Updated channel information
+
+    Raises:
+        404: Channel/plugin not found
+        422: Invalid configuration (missing required fields)
+        503: Service unavailable
+    """
+    if not PLUGIN_SERVICE_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenClaw Plugin Service is not available"
+        )
+
+    try:
+        plugin_service = get_openclaw_plugin_service()
+        result = plugin_service.enable_plugin(channel_id, request.config)
+
+        return ChannelResponse(
+            id=result["plugin_id"],
+            name=result["name"],
+            enabled=result["enabled"],
+            config=result["config"]
+        )
+
+    except PluginNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Channel plugin not found: {str(e)}"
+        )
+    except PluginConfigurationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+    except PluginCLIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OpenClaw CLI error: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to connect channel {channel_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to connect channel: {str(e)}"
+        )
+
+
+@router.delete(
+    "/channels/{channel_id}/disconnect",
+    response_model=ChannelResponse,
+    status_code=status.HTTP_200_OK
+)
+async def disconnect_channel(channel_id: str):
+    """
+    Disconnect a channel via OpenClaw plugin (Issue #98).
+
+    Disables the plugin but preserves configuration.
+
+    Args:
+        channel_id: Channel identifier
+
+    Returns:
+        ChannelResponse: Updated channel information
+
+    Raises:
+        404: Channel/plugin not found
+        503: Service unavailable
+    """
+    if not PLUGIN_SERVICE_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenClaw Plugin Service is not available"
+        )
+
+    try:
+        plugin_service = get_openclaw_plugin_service()
+        result = plugin_service.disable_plugin(channel_id)
+
+        return ChannelResponse(
+            id=result["plugin_id"],
+            name=result["name"],
+            enabled=result["enabled"],
+            config=result.get("config", {})
+        )
+
+    except PluginNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Channel plugin not found: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to disconnect channel {channel_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to disconnect channel: {str(e)}"
+        )
+
+
+@router.post(
+    "/channels/{channel_id}/test",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK
+)
+async def test_channel_connection(channel_id: str):
+    """
+    Test channel connection (Issue #98).
+
+    Verifies that the channel plugin is enabled and configuration is valid.
+
+    Args:
+        channel_id: Channel identifier
+
+    Returns:
+        Test result with connection status
+
+    Raises:
+        404: Channel/plugin not found
+        503: Service unavailable
+    """
+    if not PLUGIN_SERVICE_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenClaw Plugin Service is not available"
+        )
+
+    try:
+        plugin_service = get_openclaw_plugin_service()
+        plugin_info = plugin_service.get_plugin_info(channel_id)
+
+        # Check if enabled
+        if not plugin_info["enabled"]:
+            return {
+                "channel_id": channel_id,
+                "success": False,
+                "message": "Channel is not enabled",
+                "enabled": False
+            }
+
+        # Validate configuration
+        is_valid, errors = plugin_service.validate_plugin_config(
+            channel_id,
+            plugin_info["config"]
+        )
+
+        if not is_valid:
+            return {
+                "channel_id": channel_id,
+                "success": False,
+                "message": f"Invalid configuration: {'; '.join(errors)}",
+                "enabled": True,
+                "errors": errors
+            }
+
+        return {
+            "channel_id": channel_id,
+            "success": True,
+            "message": "Channel configuration is valid",
+            "enabled": True
+        }
+
+    except PluginNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Channel plugin not found: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to test channel {channel_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to test channel: {str(e)}"
         )
