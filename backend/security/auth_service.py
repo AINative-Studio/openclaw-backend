@@ -230,7 +230,8 @@ class AuthService:
                     # Create default workspace if none exists
                     workspace = Workspace(
                         name="Default Workspace",
-                        comment="Auto-created default workspace"
+                        slug="default-workspace",
+                        description="Auto-created default workspace"
                     )
                     db.add(workspace)
                     await db.flush()  # Flush to get workspace.id

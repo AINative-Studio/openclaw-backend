@@ -25,10 +25,9 @@ class Workspace(Base):
 
     # Primary identification
     id = Column(UUID(), primary_key=True, default=uuid4)
-    name = Column(Text, nullable=True)
-    comment = Column(Text, nullable=True)
-    meta = Column(sa.JSON, nullable=True)
-    config = Column(sa.JSON, nullable=True)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(255), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
 
     # ZeroDB integration
     zerodb_project_id = Column(String(255), nullable=True, unique=True, index=True)
