@@ -19,7 +19,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from backend.models.task_models import TaskLease, Task, TaskStatus
+from backend.models.task_lease import TaskLease, Task, TaskStatus
 
 
 logger = logging.getLogger(__name__)
@@ -232,6 +232,10 @@ class LeaseExpirationService:
             Dictionary with expiration statistics
         """
         try:
+            # Clear any stale transaction state before querying
+            self.db_session.expire_all()  # Expire all cached objects
+            self.db_session.rollback()    # Clear any pending transaction state
+
             active_leases = self.db_session.query(TaskLease).count()
 
             # Count active leases that will expire soon (within next scan interval)
@@ -250,5 +254,37 @@ class LeaseExpirationService:
             }
 
         except Exception as e:
+            self.db_session.rollback()  # Ensure rollback on error
             logger.error(f"Error getting expiration stats: {e}", exc_info=True)
-            return {}
+            # Return degraded stats instead of empty dict
+            return {
+                "error": str(e),
+                "active_leases": None,
+                "upcoming_expirations": None,
+                "scan_interval": self.scan_interval,
+                "grace_period": self.grace_period
+            }
+
+# Global service instance
+_lease_expiration_service: Optional[LeaseExpirationService] = None
+
+
+def get_lease_expiration_service() -> LeaseExpirationService:
+    """
+    Get global lease expiration service instance
+    
+    Returns:
+        LeaseExpirationService instance
+    """
+    global _lease_expiration_service
+    
+    if _lease_expiration_service is None:
+        from backend.db.base import SessionLocal
+        db_session = SessionLocal()
+        _lease_expiration_service = LeaseExpirationService(
+            db_session=db_session,
+            scan_interval=10,
+            grace_period=2
+        )
+    
+    return _lease_expiration_service

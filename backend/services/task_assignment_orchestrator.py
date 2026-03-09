@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from sqlalchemy.orm import Session
 
-from backend.models.task_models import Task, TaskLease, TaskStatus
+from backend.models.task_lease import Task, TaskLease, TaskStatus
 
 
 # Configure logging

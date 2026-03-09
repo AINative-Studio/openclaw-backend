@@ -16,9 +16,8 @@ import jwt
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from backend.models.task import Task, TaskStatus
-from backend.models.task_lease import TaskLease
-from backend.models.task_lease_models import NodeCapability, TaskComplexity
+from backend.models.task_lease import Task, TaskLease, TaskStatus
+from backend.models.node_capability import NodeCapability, TaskComplexity
 from backend.schemas.task_lease_schemas import (
     TaskLeaseRequest,
     TaskLeaseResponse
