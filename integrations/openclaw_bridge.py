@@ -131,7 +131,7 @@ class OpenClawBridge:
             dict with 'result' containing payloads and meta, or error information
         """
         idempotency_key = str(uuid.uuid4())
-        return await self._request("agent", {
+        return await self._request("agent.send", {
             "sessionKey": session_key,
             "message": message,
             "idempotencyKey": idempotency_key,

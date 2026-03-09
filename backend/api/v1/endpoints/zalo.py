@@ -16,6 +16,9 @@ import json
 from typing import Dict, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
+
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.base import get_db

@@ -132,11 +132,11 @@ class DBOSWorkflowClient:
             )
 
         request_data = {
-            "agentId": agent_id,
+            "agentId": str(agent_id),  # Convert UUID to string for JSON serialization
             "name": name,
             "persona": persona,
             "model": model,
-            "userId": user_id,
+            "userId": str(user_id),  # Convert UUID to string for JSON serialization
             "sessionKey": session_key,
             "heartbeatEnabled": heartbeat_enabled,
             "heartbeatInterval": heartbeat_interval,
@@ -201,7 +201,7 @@ class DBOSWorkflowClient:
             )
 
         request_data = {
-            "agentId": agent_id,
+            "agentId": str(agent_id),  # Convert UUID to string for JSON serialization
             "sessionKey": session_key,
             "checklist": checklist,
             "executionId": execution_id or f"hb_{agent_id}_{int(datetime.now(timezone.utc).timestamp())}"
@@ -268,7 +268,7 @@ class DBOSWorkflowClient:
             )
 
         request_data = {
-            "agentId": agent_id,
+            "agentId": str(agent_id),  # Convert UUID to string for JSON serialization
             "action": action,
             "sessionKey": session_key,
             "preserveState": preserve_state

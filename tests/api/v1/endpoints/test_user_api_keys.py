@@ -14,8 +14,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.main import app
-from backend.db.base_class import Base
 from backend.db.base import get_db
+from backend.models.user_api_key import UserAPIKey
 
 
 # Generate a test encryption key
@@ -30,17 +30,15 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="function")
 def db_session():
     """Create test database session."""
-    # Import models to ensure they're registered with Base.metadata
-    from backend.models.user_api_key import UserAPIKey  # noqa: F401
-    from backend.models.api_key import APIKey  # noqa: F401
+    # Create ONLY the user_api_keys table to avoid FK issues with other models
+    UserAPIKey.__table__.create(bind=engine, checkfirst=True)
 
-    Base.metadata.create_all(bind=engine)
     session = TestingSessionLocal()
     try:
         yield session
     finally:
         session.close()
-        Base.metadata.drop_all(bind=engine)
+        UserAPIKey.__table__.drop(bind=engine, checkfirst=True)
 
 
 @pytest.fixture(scope="function")

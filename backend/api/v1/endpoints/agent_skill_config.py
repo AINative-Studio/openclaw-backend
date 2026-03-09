@@ -10,6 +10,9 @@ from uuid import UUID
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 

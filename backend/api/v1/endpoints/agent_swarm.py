@@ -12,6 +12,9 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)

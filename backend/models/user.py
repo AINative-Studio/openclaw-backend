@@ -34,6 +34,7 @@ class User(Base):
     # Primary identification
     id = Column(UUID(), primary_key=True, default=uuid4)
     email = Column(String(255), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=True)  # Nullable for gradual migration
     full_name = Column(String(255), nullable=True)
 
     # Workspace relationship

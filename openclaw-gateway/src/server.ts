@@ -11,10 +11,17 @@ import { WebSocketServer } from 'ws';
 import dotenv from 'dotenv';
 import { AgentMessageWorkflow } from './workflows/agent-message-workflow.js';
 import { AgentLifecycleWorkflow } from './workflows/agent-lifecycle-workflow.js';
+import { ChatWorkflow } from './workflows/chat-workflow.js';
+import { SkillInstallationWorkflow } from './workflows/skill-installation-workflow.js';
+import { SkillExecutionWorkflow } from './workflows/skill-execution-workflow.js';
+import { initializeZeroDBClient } from './utils/zerodb-client.js';
 
 dotenv.config();
 
 const PORT = parseInt(process.env.PORT || '8080');
+
+// Skill workflows are now available (imported before DBOS.launch)
+const SKILL_WORKFLOWS_AVAILABLE = true;
 
 /**
  * Initialize OpenClaw Gateway
@@ -25,6 +32,16 @@ async function startGateway() {
   // Initialize DBOS
   await DBOS.launch();
   console.log('✓ DBOS initialized');
+
+  // Initialize ZeroDB client
+  try {
+    await initializeZeroDBClient();
+    console.log('✓ ZeroDB Memory MCP initialized');
+  } catch (error) {
+    console.warn('⚠ ZeroDB initialization failed (memory features disabled):', error);
+  }
+
+  console.log('✓ Skill workflows registered (imported at top of file)');
 
   // Create Express app
   const app = express();
@@ -40,12 +57,16 @@ async function startGateway() {
         health: 'GET /health',
         workflowStatus: 'GET /workflows/:uuid',
         sendMessage: 'POST /messages',
+        chat: 'POST /chat',
         provisionAgent: 'POST /workflows/provision-agent',
         heartbeat: 'POST /workflows/heartbeat',
         pauseResume: 'POST /workflows/pause-resume',
+        skillInstallation: 'POST /workflows/skill-installation' + (SKILL_WORKFLOWS_AVAILABLE ? '' : ' (unavailable)'),
+        skillExecution: 'POST /workflows/skill-execution' + (SKILL_WORKFLOWS_AVAILABLE ? '' : ' (unavailable)'),
         websocket: 'ws://localhost:' + PORT
       },
       status: 'running',
+      skillWorkflows: SKILL_WORKFLOWS_AVAILABLE ? 'enabled' : 'disabled',
       timestamp: new Date().toISOString()
     });
   });
@@ -98,6 +119,60 @@ async function startGateway() {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Chat workflow endpoint (Phase 2: DBOS Chat with Personality + Memory)
+  app.post('/chat', async (req, res) => {
+    try {
+      // Validate required fields
+      const { conversationId, agentId, workspaceId, message, conversationHistory } = req.body;
+
+      if (!conversationId || !agentId || !workspaceId || !message) {
+        return res.status(400).json({
+          error: 'Missing required fields',
+          required: ['conversationId', 'agentId', 'workspaceId', 'message']
+        });
+      }
+
+      // Build conversation context
+      const context = {
+        conversationId,
+        agentId,
+        workspaceId,
+        userId: req.body.userId
+      };
+
+      // Build user message
+      const userMessage = {
+        role: 'user' as const,
+        content: message,
+        timestamp: Date.now()
+      };
+
+      // Start chat workflow
+      const handle = await DBOS.startWorkflow(ChatWorkflow).processChat(
+        context,
+        userMessage,
+        conversationHistory || []
+      );
+
+      const result = await handle.getResult();
+
+      res.json({
+        success: true,
+        workflowUuid: (handle as any).getWorkflowUUID(),
+        conversationId: result.conversationId,
+        userMessageId: result.userMessageId,
+        assistantMessageId: result.assistantMessageId,
+        response: result.assistantContent,
+        tokensUsed: result.tokensUsed,
+        processingTimeMs: result.processingTimeMs
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Gateway] Chat workflow error:', error);
       res.status(500).json({ error: errorMessage });
     }
   });
@@ -177,6 +252,148 @@ async function startGateway() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  /**
+   * Skill Installation Workflow
+   * POST /workflows/skill-installation
+   *
+   * Body: {
+   *   skillName: string,
+   *   method: 'npm' | 'brew',
+   *   agentId?: string
+   * }
+   */
+  app.post('/workflows/skill-installation', async (req, res) => {
+    // Check if skill workflows are available
+    if (!SKILL_WORKFLOWS_AVAILABLE || !SkillInstallationWorkflow) {
+      return res.status(503).json({
+        error: 'Skill workflows are not available. The workflow modules have not been loaded.',
+        details: 'skill-installation-workflow.ts may not exist or failed to load during startup'
+      });
+    }
+
+    try {
+      const { skillName, method, agentId } = req.body;
+
+      // Validate required fields
+      if (!skillName || !method) {
+        return res.status(400).json({
+          error: 'Missing required fields: skillName, method'
+        });
+      }
+
+      // Validate method value
+      if (method !== 'npm' && method !== 'brew') {
+        return res.status(400).json({
+          error: 'Invalid method. Must be "npm" or "brew"'
+        });
+      }
+
+      console.log(`[Gateway] Starting skill installation workflow: ${skillName} via ${method}`);
+
+      // Invoke workflow
+      const handle = await DBOS.startWorkflow(SkillInstallationWorkflow).installSkill({
+        skillName,
+        method,
+        agentId
+      });
+
+      const result = await handle.getResult();
+
+      if (result.success) {
+        console.log(`[Gateway] Skill installation successful: ${skillName}`);
+        return res.status(200).json({
+          success: true,
+          workflowUuid: (handle as any).getWorkflowUUID(),
+          skillName: result.skillName,
+          installedAt: result.installedAt,
+          binaryPath: result.binaryPath
+        });
+      } else {
+        console.error(`[Gateway] Skill installation failed: ${skillName} - ${result.error}`);
+        return res.status(500).json({
+          success: false,
+          workflowUuid: (handle as any).getWorkflowUUID(),
+          skillName: result.skillName,
+          error: result.error
+        });
+      }
+    } catch (error: any) {
+      console.error('[Gateway] Skill installation workflow error:', error);
+      return res.status(500).json({
+        error: error.message || 'Installation workflow failed'
+      });
+    }
+  });
+
+  /**
+   * Skill Execution Workflow
+   * POST /workflows/skill-execution
+   *
+   * Body: {
+   *   skillName: string,
+   *   agentId: string,
+   *   parameters: Record<string, any>,
+   *   timeoutSeconds?: number
+   * }
+   */
+  app.post('/workflows/skill-execution', async (req, res) => {
+    // Check if skill workflows are available
+    if (!SKILL_WORKFLOWS_AVAILABLE || !SkillExecutionWorkflow) {
+      return res.status(503).json({
+        error: 'Skill workflows are not available. The workflow modules have not been loaded.',
+        details: 'skill-execution-workflow.ts may not exist or failed to load during startup'
+      });
+    }
+
+    try {
+      const { skillName, agentId, parameters, timeoutSeconds } = req.body;
+
+      // Validate required fields
+      if (!skillName || !agentId) {
+        return res.status(400).json({
+          error: 'Missing required fields: skillName, agentId'
+        });
+      }
+
+      console.log(`[Gateway] Starting skill execution workflow: ${skillName} for agent ${agentId}`);
+
+      // Invoke workflow
+      const handle = await DBOS.startWorkflow(SkillExecutionWorkflow).executeSkill({
+        skillName,
+        agentId,
+        parameters: parameters || {},
+        timeoutSeconds
+      });
+
+      const result = await handle.getResult();
+
+      if (result.success) {
+        console.log(`[Gateway] Skill execution successful: ${skillName} (${result.executionTimeMs}ms)`);
+        return res.status(200).json({
+          success: true,
+          workflowUuid: (handle as any).getWorkflowUUID(),
+          skillName: result.skillName,
+          output: result.output,
+          executionTimeMs: result.executionTimeMs
+        });
+      } else {
+        console.error(`[Gateway] Skill execution failed: ${skillName} - ${result.error}`);
+        return res.status(500).json({
+          success: false,
+          workflowUuid: (handle as any).getWorkflowUUID(),
+          skillName: result.skillName,
+          error: result.error,
+          executionTimeMs: result.executionTimeMs
+        });
+      }
+    } catch (error: any) {
+      console.error('[Gateway] Skill execution workflow error:', error);
+      return res.status(500).json({
+        error: error.message || 'Execution workflow failed'
+      });
     }
   });
 

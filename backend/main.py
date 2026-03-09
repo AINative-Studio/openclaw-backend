@@ -12,6 +12,16 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+from backend.middleware.security_headers import add_security_headers_middleware
+from backend.middleware.rate_limit import (
+    limiter,
+    rate_limit_exceeded_handler,
+    is_rate_limiting_enabled,
+    get_rate_limit_stats,
+)
+from slowapi.errors import RateLimitExceeded
 
 from backend.db.base import init_db
 
@@ -25,19 +35,105 @@ if os.getenv("DD_LLMOBS_ENABLED", "0") == "1":
     except ImportError:
         pass
 
+# Security: Disable API documentation in production environments
+# Docs are enabled in development, staging, and testing environments
+environment = os.getenv("ENVIRONMENT", "development").lower()
+enable_docs = environment in ("development", "staging", "testing", "test")
+
+docs_url = "/docs" if enable_docs else None
+redoc_url = "/redoc" if enable_docs else None
+openapi_url = "/openapi.json" if enable_docs else None
+
 app = FastAPI(
     title="AgentClaw Backend",
     description="Backend API for AgentClaw AI Agent Management Platform",
     version="1.0.0",
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
 )
 
+# Register rate limiter with FastAPI app
+if is_rate_limiting_enabled():
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    print(f"✅ Rate limiting enabled: {get_rate_limit_stats()}")
+else:
+    print("⚠️ Rate limiting is disabled")
+
+# Configure CORS with explicit origin whitelist
+# Parse allowed origins from environment
+ALLOWED_ORIGINS_STR = os.getenv("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS_STR.split(",") if origin.strip()]
+
+# Development fallback with explicit localhost origins
+if not ALLOWED_ORIGINS:
+    if environment in ("development", "staging", "testing", "test"):
+        # Development/testing: Allow localhost on common ports
+        ALLOWED_ORIGINS = [
+            "http://localhost:3000",
+            "http://localhost:3002",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3002",
+        ]
+        print(f"CORS: Using development fallback origins: {ALLOWED_ORIGINS}")
+    else:
+        # Production: ALLOWED_ORIGINS is required
+        raise ValueError(
+            "ALLOWED_ORIGINS environment variable must be set in production. "
+            "Example: ALLOWED_ORIGINS=https://app.example.com,https://api.example.com"
+        )
+
+# Add CORS middleware with security hardening
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,  # Explicit whitelist (no wildcards)
+    allow_credentials=True,  # Allow cookies/auth headers
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # Specific methods only
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "User-Agent",
+        "DNT",
+        "Cache-Control",
+        "X-Requested-With",
+    ],  # Specific headers only
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
+
+# Add Security Headers Middleware (OWASP best practices)
+# Implements: HSTS, X-Content-Type-Options, X-Frame-Options, CSP, etc.
+add_security_headers_middleware(app, environment=environment)
+
+# Add TrustedHostMiddleware to prevent Host header attacks
+# Parse allowed hosts from environment
+ALLOWED_HOSTS_STR = os.getenv("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STR.split(",") if host.strip()]
+
+# Development fallback with localhost
+if not ALLOWED_HOSTS:
+    if environment in ("development", "staging", "testing", "test"):
+        ALLOWED_HOSTS = [
+            "localhost",
+            "127.0.0.1",
+            "*.localhost",
+            "*.127.0.0.1",
+        ]
+        print(f"TrustedHost: Using development fallback hosts: {ALLOWED_HOSTS}")
+    else:
+        # Production: ALLOWED_HOSTS is required
+        raise ValueError(
+            "ALLOWED_HOSTS environment variable must be set in production. "
+            "Example: ALLOWED_HOSTS=api.example.com,app.example.com"
+        )
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=ALLOWED_HOSTS
+)
+
 
 # Register routers — each uses try/except so unavailable services don't block startup
 def _register_routers() -> None:
@@ -220,6 +316,24 @@ _register_routers()
 
 @app.on_event("startup")
 async def startup():
+    # Validate CORS configuration on startup
+    if "*" in ALLOWED_ORIGINS:
+        raise ValueError(
+            "CRITICAL SECURITY ERROR: Wildcard CORS origins (*) are not allowed. "
+            "This creates a security vulnerability allowing any domain to make authenticated requests. "
+            "Set ALLOWED_ORIGINS environment variable with explicit domain whitelist."
+        )
+
+    for origin in ALLOWED_ORIGINS:
+        if not origin.startswith(("http://", "https://")):
+            raise ValueError(
+                f"Invalid origin format: {origin}. "
+                f"Origins must start with http:// or https://. "
+                f"Example: https://app.example.com"
+            )
+
+    print(f"CORS: Configured with {len(ALLOWED_ORIGINS)} allowed origins")
+
     init_db()
 
     try:
@@ -329,6 +443,17 @@ async def startup():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/rate-limit-status")
+async def rate_limit_status():
+    """
+    Get rate limiting configuration and status.
+
+    Returns current rate limit configuration, backend type,
+    and active rate limit profiles.
+    """
+    return get_rate_limit_stats()
 
 
 @app.get("/metrics")

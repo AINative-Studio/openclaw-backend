@@ -44,14 +44,23 @@ export class AgentMessageWorkflow {
 
   /**
    * Store message in database for durability
+   * Note: Using knex raw queries as DBOS.query() doesn't exist
    */
   @DBOS.step()
   static async storeMessage(message: AgentMessage): Promise<void> {
     DBOS.logger.info(`Storing message ${message.id} in database`);
 
-    await (DBOS as any).query(
+    // Access knex client - it exists at runtime but not in TypeScript types
+    // Use knex directly from DBOS (knex is configured as app_db_client in dbos-config.yaml)
+    const knex = (DBOS as any).knexClient;
+    if (!knex) {
+      DBOS.logger.warn('knexClient not available, skipping database storage');
+      return;
+    }
+
+    await knex.raw(
       `INSERT INTO dbos_system.notifications (workflow_uuid, topic, message, created_at)
-       VALUES ($1, $2, $3, NOW())`,
+       VALUES (?, ?, ?, NOW())`,
       [DBOS.workflowID, `agent.message.${message.to}`, JSON.stringify(message)]
     );
   }
@@ -111,13 +120,18 @@ export class AgentMessageWorkflow {
   static async recoverWorkflow(workflowUuid: string): Promise<void> {
     DBOS.logger.info(`Recovering workflow ${workflowUuid}`);
 
+    const knex = (DBOS as any).knexClient;
+    if (!knex) {
+      throw new Error('knexClient not available for recovery');
+    }
+
     // Query workflow status
-    const status = await (DBOS as any).query(
-      `SELECT * FROM dbos_system.workflow_status WHERE workflow_uuid = $1`,
+    const status = await knex.raw(
+      `SELECT * FROM dbos_system.workflow_status WHERE workflow_uuid = ?`,
       [workflowUuid]
     );
 
-    if (!status.rows.length) {
+    if (!status.rows || !status.rows.length) {
       throw new Error(`Workflow ${workflowUuid} not found`);
     }
 
@@ -125,10 +139,10 @@ export class AgentMessageWorkflow {
     DBOS.logger.info(`Found workflow in status: ${workflow.status}`);
 
     // Increment recovery attempts
-    await (DBOS as any).query(
+    await knex.raw(
       `UPDATE dbos_system.workflow_status
        SET recovery_attempts = recovery_attempts + 1, updated_at = NOW()
-       WHERE workflow_uuid = $1`,
+       WHERE workflow_uuid = ?`,
       [workflowUuid]
     );
 

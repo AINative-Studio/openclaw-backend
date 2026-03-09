@@ -9,8 +9,14 @@ import json
 import subprocess
 from typing import List, Dict, Any, Optional
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# Cache for skills to avoid repeated expensive openclaw calls
+_skills_cache: Optional[Dict[str, Any]] = None
+_cache_timestamp: float = 0
+CACHE_TTL_SECONDS = 60  # Cache for 1 minute
 
 
 class OpenClawSkillsService:
@@ -20,10 +26,19 @@ class OpenClawSkillsService:
     def get_all_skills() -> Dict[str, Any]:
         """
         Get all available OpenClaw skills by calling `openclaw skills list --json`
+        Uses in-memory cache to avoid repeated expensive subprocess calls.
 
         Returns:
             Dict with 'total', 'ready', 'skills' list
         """
+        global _skills_cache, _cache_timestamp
+
+        # Return cached data if still valid
+        current_time = time.time()
+        if _skills_cache is not None and (current_time - _cache_timestamp) < CACHE_TTL_SECONDS:
+            logger.debug(f"Returning cached skills (age: {current_time - _cache_timestamp:.1f}s)")
+            return _skills_cache
+
         try:
             import os
             # Ensure GOPATH/bin is in PATH for Go-installed skill binaries
@@ -43,7 +58,7 @@ class OpenClawSkillsService:
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=20,  # Increased from 10s - openclaw can take 15+ seconds
+                timeout=5,  # Reduced to 5s - fail fast if OpenClaw is unresponsive
                 executable="/bin/zsh",  # Use zsh which loads user PATH
                 env=env  # Pass modified environment with Go/Homebrew paths
             )
@@ -69,13 +84,21 @@ class OpenClawSkillsService:
                 # Count eligible (ready) skills
                 ready_count = sum(1 for s in skills if s.get("eligible", False))
 
-                return {
+                result_data = {
                     "total": len(skills),
                     "ready": ready_count,
                     "skills": skills
                 }
+
+                # Cache successful result
+                _skills_cache = result_data
+                _cache_timestamp = current_time
+                logger.info(f"Cached {len(skills)} skills from OpenClaw CLI")
+
+                return result_data
             else:
                 logger.error(f"openclaw skills list failed: {result.stderr}")
+                # Return empty but don't cache failures
                 return {
                     "total": 0,
                     "ready": 0,
@@ -83,7 +106,8 @@ class OpenClawSkillsService:
                 }
 
         except subprocess.TimeoutExpired:
-            logger.error("openclaw skills list timed out")
+            logger.error("openclaw skills list timed out after 5s")
+            # Return empty but don't cache timeout
             return {"total": 0, "ready": 0, "skills": []}
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse skills JSON: {e}")

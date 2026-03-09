@@ -15,6 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.db.base import get_db
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
 from backend.schemas.api_key import (
     APIKeyCreate,
     APIKeyUpdate,
@@ -41,6 +43,7 @@ def get_api_key_service(db: Session = Depends(get_db)) -> APIKeyService:
 
 @router.get("", response_model=list[APIKeyResponse])
 def list_api_keys(
+    current_user: User = Depends(get_current_active_user),
     service: APIKeyService = Depends(get_api_key_service)
 ):
     """
@@ -75,6 +78,7 @@ def list_api_keys(
 @router.post("", response_model=APIKeyResponse, status_code=status.HTTP_201_CREATED)
 def create_api_key(
     payload: APIKeyCreate,
+    current_user: User = Depends(get_current_active_user),
     service: APIKeyService = Depends(get_api_key_service)
 ):
     """
@@ -113,6 +117,7 @@ def create_api_key(
 def update_api_key(
     service_name: str,
     payload: APIKeyUpdate,
+    current_user: User = Depends(get_current_active_user),
     service: APIKeyService = Depends(get_api_key_service)
 ):
     """
@@ -150,6 +155,7 @@ def update_api_key(
 @router.delete("/{service_name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_api_key(
     service_name: str,
+    current_user: User = Depends(get_current_active_user),
     service: APIKeyService = Depends(get_api_key_service)
 ):
     """
@@ -174,6 +180,7 @@ def delete_api_key(
 @router.get("/{service_name}/verify", response_model=APIKeyVerifyResponse)
 def verify_api_key(
     service_name: SupportedService,
+    current_user: User = Depends(get_current_active_user),
     service: APIKeyService = Depends(get_api_key_service)
 ):
     """

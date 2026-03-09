@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 16 16" role="img" aria-label="Pixel bee representing Agent Swarm by AINative">
+  <title>Agent Swarm Bee</title>
+  <desc>A pixel art bee symbolizing swarm intelligence and multi-agent collaboration</desc>
+
+  <!-- Background (transparent) -->
+  <rect width="16" height="16" fill="none"/>
+
+  <!-- Antennae (dark brown/black) -->
+  <g fill="#2d1810">
+    <!-- Left antenna -->
+    <rect x="5" y="1" width="1" height="1"/>
+    <rect x="6" y="2" width="1" height="1"/>
+    <!-- Right antenna -->
+    <rect x="10" y="1" width="1" height="1"/>
+    <rect x="9" y="2" width="1" height="1"/>
+  </g>
+
+  <!-- Head outline (dark brown) -->
+  <g fill="#3a2416">
+    <rect x="5" y="3" width="6" height="1"/>
+    <rect x="4" y="4" width="1" height="1"/>
+    <rect x="11" y="4" width="1" height="1"/>
+    <rect x="4" y="5" width="1" height="1"/>
+    <rect x="11" y="5" width="1" height="1"/>
+  </g>
+
+  <!-- Head fill (golden yellow) -->
+  <g fill="#FFB300">
+    <rect x="5" y="4" width="6" height="1"/>
+    <rect x="5" y="5" width="6" height="1"/>
+  </g>
+
+  <!-- Eyes (black with white highlights) -->
+  <g fill="#1a1a1a">
+    <rect x="6" y="4" width="1" height="1"/>
+    <rect x="9" y="4" width="1" height="1"/>
+  </g>
+  <g fill="#ffffff">
+    <rect x="6" y="3" width="1" height="1" opacity="0.4"/>
+    <rect x="9" y="3" width="1" height="1" opacity="0.4"/>
+  </g>
+
+  <!-- Body outline (dark brown) -->
+  <g fill="#3a2416">
+    <rect x="4" y="6" width="1" height="1"/>
+    <rect x="11" y="6" width="1" height="1"/>
+    <rect x="3" y="7" width="1" height="2"/>
+    <rect x="12" y="7" width="1" height="2"/>
+    <rect x="3" y="9" width="1" height="1"/>
+    <rect x="12" y="9" width="1" height="1"/>
+    <rect x="4" y="10" width="1" height="1"/>
+    <rect x="11" y="10" width="1" height="1"/>
+    <rect x="5" y="11" width="6" height="1"/>
+  </g>
+
+  <!-- Body segments (alternating amber/golden stripes) -->
+  <!-- Segment 1 (amber) -->
+  <g fill="#FFA500">
+    <rect x="5" y="6" width="6" height="1"/>
+    <rect x="4" y="7" width="8" height="1"/>
+  </g>
+
+  <!-- Segment 2 (dark stripe) -->
+  <g fill="#5a3a1a">
+    <rect x="4" y="8" width="8" height="1"/>
+  </g>
+
+  <!-- Segment 3 (golden) -->
+  <g fill="#FFD700">
+    <rect x="4" y="9" width="8" height="1"/>
+  </g>
+
+  <!-- Segment 4 (dark stripe) -->
+  <g fill="#5a3a1a">
+    <rect x="5" y="10" width="6" height="1"/>
+  </g>
+
+  <!-- Wings (translucent white/blue) -->
+  <g fill="#d4e8f7" opacity="0.75">
+    <!-- Left wing -->
+    <rect x="1" y="7" width="1" height="1"/>
+    <rect x="2" y="7" width="2" height="2"/>
+    <rect x="2" y="9" width="1" height="1"/>
+
+    <!-- Right wing -->
+    <rect x="14" y="7" width="1" height="1"/>
+    <rect x="12" y="7" width="2" height="2"/>
+    <rect x="13" y="9" width="1" height="1"/>
+  </g>
+
+  <!-- Wing outlines (very light gray) -->
+  <g fill="#b0c8d8" opacity="0.5">
+    <rect x="1" y="6" width="1" height="1"/>
+    <rect x="2" y="6" width="1" height="1"/>
+    <rect x="14" y="6" width="1" height="1"/>
+    <rect x="13" y="6" width="1" height="1"/>
+  </g>
+
+  <!-- Stinger (optional, small) -->
+  <g fill="#3a2416">
+    <rect x="7" y="12" width="2" height="1"/>
+    <rect x="7" y="13" width="2" height="1" opacity="0.7"/>
+  </g>
+
+  <!-- Subtle shine/highlights on body (amber glow) -->
+  <g fill="#ffe4b3" opacity="0.3">
+    <rect x="5" y="6" width="2" height="1"/>
+    <rect x="9" y="6" width="2" height="1"/>
+  </g>
+</svg>

@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 import os
 
 from backend.db.base import get_async_db
+from backend.security.auth_dependencies import get_current_active_user
+from backend.security.authorization_service import verify_conversation_access, AuthorizationService
+from backend.models.user import User
 from backend.schemas.conversation import (
     ConversationListResponse,
     ConversationResponse,
@@ -71,6 +74,7 @@ async def list_conversations(
     status: Optional[str] = Query(None, description="Filter by conversation status"),
     limit: int = Query(50, ge=1, le=200, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -99,9 +103,14 @@ async def list_conversations(
     Example:
         GET /conversations?workspace_id=123e4567-e89b-12d3-a456-426614174000&limit=10&offset=0
     """
+    # Enforce workspace filtering to prevent IDOR (Issue #130)
+    auth_service = AuthorizationService(db=await service.db)
+    enforced_workspace_id = auth_service.enforce_workspace_filter(workspace_id, current_user)
+
+    # List only conversations from user's workspace
     conversations, total = await service.list_conversations(
         agent_id=agent_id,
-        workspace_id=workspace_id,
+        workspace_id=enforced_workspace_id,  # Always use enforced workspace ID
         status=status,
         limit=limit,
         offset=offset
@@ -118,6 +127,7 @@ async def list_conversations(
 @router.get("/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(
     conversation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -144,6 +154,9 @@ async def get_conversation(
             detail=f"Conversation with ID '{conversation_id}' not found"
         )
 
+    # Verify user has access to this conversation (Issue #130 - IDOR prevention)
+    verify_conversation_access(conversation, current_user, require_ownership=True)
+
     return ConversationResponse.model_validate(conversation)
 
 
@@ -152,6 +165,7 @@ async def get_conversation_messages(
     conversation_id: UUID,
     limit: int = Query(50, ge=1, le=200, description="Maximum number of messages"),
     offset: int = Query(0, ge=0, description="Number of messages to skip"),
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -175,6 +189,15 @@ async def get_conversation_messages(
     Example:
         GET /conversations/123e4567-e89b-12d3-a456-426614174000/messages?limit=20&offset=0
     """
+    # Verify conversation access before retrieving messages (Issue #130)
+    conversation = await service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID '{conversation_id}' not found"
+        )
+    verify_conversation_access(conversation, current_user, require_ownership=True)
+
     messages = await service.get_messages(
         conversation_id=conversation_id,
         limit=limit,
@@ -194,6 +217,7 @@ async def get_conversation_messages(
 async def search_conversation(
     conversation_id: UUID,
     request: SearchRequest,
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -216,6 +240,15 @@ async def search_conversation(
             "limit": 5
         }
     """
+    # Verify conversation access before searching (Issue #130)
+    conversation = await service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID '{conversation_id}' not found"
+        )
+    verify_conversation_access(conversation, current_user, require_ownership=True)
+
     result = await service.search_conversation_semantic(
         conversation_id=conversation_id,
         query=request.query,
@@ -228,6 +261,7 @@ async def search_conversation(
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     request: CreateConversationRequest,
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -248,10 +282,15 @@ async def create_conversation(
             "user_id": "987e4567-e89b-12d3-a456-426614174333"
         }
     """
+    # Verify user has access to the workspace (Issue #130 - IDOR prevention)
+    auth_service = AuthorizationService(db=await service.db)
+    auth_service.verify_workspace_access(request.workspace_id, current_user, resource_type="workspace")
+
+    # Override user_id with current user to prevent privilege escalation
     conversation = await service.create_conversation(
         workspace_id=request.workspace_id,
         agent_id=request.agent_id,
-        user_id=request.user_id
+        user_id=current_user.id  # Always use authenticated user's ID
     )
 
     return ConversationResponse.model_validate(conversation)
@@ -261,6 +300,7 @@ async def create_conversation(
 async def add_message(
     conversation_id: UUID,
     request: AddMessageRequest,
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -284,13 +324,14 @@ async def add_message(
             "metadata": {}
         }
     """
-    # Verify conversation exists
+    # Verify conversation exists and user has access (Issue #130)
     conversation = await service.get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation with ID '{conversation_id}' not found"
         )
+    verify_conversation_access(conversation, current_user, require_ownership=True)
 
     # Add message to ZeroDB
     await service.add_message(
@@ -312,6 +353,7 @@ async def add_message(
 @router.post("/{conversation_id}/archive", response_model=ConversationResponse)
 async def archive_conversation(
     conversation_id: UUID,
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -333,13 +375,17 @@ async def archive_conversation(
     Example:
         POST /conversations/123e4567-e89b-12d3-a456-426614174000/archive
     """
-    conversation = await service.archive_conversation(conversation_id)
-
+    # First, get conversation to check ownership (Issue #130)
+    conversation = await service.get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation with ID '{conversation_id}' not found"
         )
+    verify_conversation_access(conversation, current_user, require_ownership=True)
+
+    # Now archive it
+    conversation = await service.archive_conversation(conversation_id)
 
     return ConversationResponse.model_validate(conversation)
 
@@ -348,6 +394,7 @@ async def archive_conversation(
 async def get_conversation_context(
     conversation_id: UUID,
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of messages to include"),
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -370,6 +417,15 @@ async def get_conversation_context(
     Example:
         GET /conversations/123e4567-e89b-12d3-a456-426614174000/context?limit=50
     """
+    # Verify conversation access before providing context (Issue #130)
+    conversation = await service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID '{conversation_id}' not found"
+        )
+    verify_conversation_access(conversation, current_user, require_ownership=True)
+
     context = await service.get_conversation_context(
         conversation_id=conversation_id,
         limit=limit
@@ -388,6 +444,7 @@ async def get_conversation_context(
 async def attach_agent_to_conversation(
     conversation_id: UUID,
     request: AttachAgentRequest,
+    current_user: User = Depends(get_current_active_user),
     service = Depends(get_conversation_service)
 ):
     """
@@ -413,6 +470,16 @@ async def attach_agent_to_conversation(
             "agent_id": "456e4567-e89b-12d3-a456-426614174222"
         }
     """
+    # Verify conversation ownership before modifying (Issue #130)
+    conversation = await service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID '{conversation_id}' not found"
+        )
+    verify_conversation_access(conversation, current_user, require_ownership=True)
+
+    # Now attach the agent
     conversation = await service.attach_agent(
         conversation_id=conversation_id,
         agent_id=request.agent_id

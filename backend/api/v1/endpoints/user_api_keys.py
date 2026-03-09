@@ -17,6 +17,9 @@ Endpoints:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
 from sqlalchemy.orm import Session
 
 from backend.db.base import get_db
@@ -48,6 +51,7 @@ def get_user_api_key_service(db: Session = Depends(get_db)) -> UserAPIKeyService
 @router.post("", response_model=UserAPIKeyResponse, status_code=status.HTTP_201_CREATED)
 def add_api_key(
     payload: UserAPIKeyCreate,
+    current_user: User = Depends(get_current_active_user),
     service: UserAPIKeyService = Depends(get_user_api_key_service)
 ):
     """
@@ -113,6 +117,7 @@ def add_api_key(
 @router.get("", response_model=list[UserAPIKeyListItem])
 def list_api_keys(
     workspace_id: str = Query(..., description="Workspace UUID to filter keys"),
+    current_user: User = Depends(get_current_active_user),
     service: UserAPIKeyService = Depends(get_user_api_key_service)
 ):
     """
@@ -163,6 +168,7 @@ def list_api_keys(
 @router.delete("/{key_id}", response_model=UserAPIKeyDeleteResponse)
 def delete_api_key(
     key_id: str,
+    current_user: User = Depends(get_current_active_user),
     service: UserAPIKeyService = Depends(get_user_api_key_service)
 ):
     """
@@ -204,6 +210,7 @@ def delete_api_key(
 @router.post("/test", response_model=UserAPIKeyTestResponse)
 def test_api_key(
     payload: UserAPIKeyTestRequest,
+    current_user: User = Depends(get_current_active_user),
     service: UserAPIKeyService = Depends(get_user_api_key_service)
 ):
     """

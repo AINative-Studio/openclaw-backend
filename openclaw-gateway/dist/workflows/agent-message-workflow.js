@@ -13,7 +13,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
-import { Workflow, Step } from '@dbos-inc/dbos-sdk';
+import { DBOS } from '@dbos-inc/dbos-sdk';
 /**
  * Main workflow class for agent message routing
  */
@@ -21,8 +21,8 @@ export class AgentMessageWorkflow {
     /**
      * Validate incoming message
      */
-    static async validateMessage(ctx, message) {
-        ctx.logger.info(`Validating message ${message.id}`);
+    static async validateMessage(message) {
+        DBOS.logger.info(`Validating message ${message.id}`);
         if (!message.id || !message.from || !message.to || !message.content) {
             throw new Error('Invalid message: missing required fields');
         }
@@ -30,17 +30,25 @@ export class AgentMessageWorkflow {
     }
     /**
      * Store message in database for durability
+     * Note: Using knex raw queries as DBOS.query() doesn't exist
      */
-    static async storeMessage(ctx, message) {
-        ctx.logger.info(`Storing message ${message.id} in database`);
-        await ctx.query(`INSERT INTO dbos_system.notifications (workflow_uuid, topic, message, created_at)
-       VALUES ($1, $2, $3, NOW())`, [ctx.workflowUUID, `agent.message.${message.to}`, JSON.stringify(message)]);
+    static async storeMessage(message) {
+        DBOS.logger.info(`Storing message ${message.id} in database`);
+        // Access knex client - it exists at runtime but not in TypeScript types
+        // Use knex directly from DBOS (knex is configured as app_db_client in dbos-config.yaml)
+        const knex = DBOS.knexClient;
+        if (!knex) {
+            DBOS.logger.warn('knexClient not available, skipping database storage');
+            return;
+        }
+        await knex.raw(`INSERT INTO dbos_system.notifications (workflow_uuid, topic, message, created_at)
+       VALUES (?, ?, ?, NOW())`, [DBOS.workflowID, `agent.message.${message.to}`, JSON.stringify(message)]);
     }
     /**
      * Route message to target agent
      */
-    static async routeMessage(ctx, message) {
-        ctx.logger.info(`Routing message ${message.id} to agent ${message.to}`);
+    static async routeMessage(message) {
+        DBOS.logger.info(`Routing message ${message.id} to agent ${message.to}`);
         // Simulate routing logic (in production, this would connect to actual agent endpoints)
         const deliveryAttempts = 1;
         const lastAttemptTime = Date.now();
@@ -51,76 +59,80 @@ export class AgentMessageWorkflow {
             deliveryAttempts,
             lastAttemptTime,
         };
-        ctx.logger.info(`Message ${message.id} routed successfully`, result);
+        DBOS.logger.info(`Message ${message.id} routed successfully`);
         return result;
     }
     /**
      * Main workflow: orchestrates message routing with durability
      */
-    static async routeAgentMessage(ctx, message) {
-        ctx.logger.info(`Starting workflow for message ${message.id}`);
+    static async routeAgentMessage(message) {
+        DBOS.logger.info(`Starting workflow for message ${message.id}`);
         try {
             // Step 1: Validate message
-            await AgentMessageWorkflow.validateMessage(ctx, message);
+            await AgentMessageWorkflow.validateMessage(message);
             // Step 2: Store for durability
-            await AgentMessageWorkflow.storeMessage(ctx, message);
+            await AgentMessageWorkflow.storeMessage(message);
             // Step 3: Route to target
-            const result = await AgentMessageWorkflow.routeMessage(ctx, message);
-            ctx.logger.info(`Workflow completed for message ${message.id}`, result);
+            const result = await AgentMessageWorkflow.routeMessage(message);
+            DBOS.logger.info(`Workflow completed for message ${message.id}`);
             return result;
         }
         catch (error) {
-            ctx.logger.error(`Workflow failed for message ${message.id}`, error);
+            DBOS.logger.error(`Workflow failed for message ${message.id}`, error);
             throw error;
         }
     }
     /**
      * Recovery workflow: automatically resumes interrupted workflows
      */
-    static async recoverWorkflow(ctx, workflowUuid) {
-        ctx.logger.info(`Recovering workflow ${workflowUuid}`);
+    static async recoverWorkflow(workflowUuid) {
+        DBOS.logger.info(`Recovering workflow ${workflowUuid}`);
+        const knex = DBOS.knexClient;
+        if (!knex) {
+            throw new Error('knexClient not available for recovery');
+        }
         // Query workflow status
-        const status = await ctx.query(`SELECT * FROM dbos_system.workflow_status WHERE workflow_uuid = $1`, [workflowUuid]);
-        if (!status.rows.length) {
+        const status = await knex.raw(`SELECT * FROM dbos_system.workflow_status WHERE workflow_uuid = ?`, [workflowUuid]);
+        if (!status.rows || !status.rows.length) {
             throw new Error(`Workflow ${workflowUuid} not found`);
         }
         const workflow = status.rows[0];
-        ctx.logger.info(`Found workflow in status: ${workflow.status}`);
+        DBOS.logger.info(`Found workflow in status: ${workflow.status}`);
         // Increment recovery attempts
-        await ctx.query(`UPDATE dbos_system.workflow_status 
+        await knex.raw(`UPDATE dbos_system.workflow_status
        SET recovery_attempts = recovery_attempts + 1, updated_at = NOW()
-       WHERE workflow_uuid = $1`, [workflowUuid]);
-        ctx.logger.info(`Recovery completed for workflow ${workflowUuid}`);
+       WHERE workflow_uuid = ?`, [workflowUuid]);
+        DBOS.logger.info(`Recovery completed for workflow ${workflowUuid}`);
     }
 }
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentMessageWorkflow, "validateMessage", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentMessageWorkflow, "storeMessage", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentMessageWorkflow, "routeMessage", null);
 __decorate([
-    Workflow(),
+    DBOS.workflow(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentMessageWorkflow, "routeAgentMessage", null);
 __decorate([
-    Workflow(),
+    DBOS.workflow(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AgentMessageWorkflow, "recoverWorkflow", null);
 //# sourceMappingURL=agent-message-workflow.js.map

@@ -28,10 +28,20 @@ test_*.db
 # Database
 openclaw.db
 
-# Environment (keep .example files)
+# Environment variables and credentials (NEVER commit these!)
 .env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.staging
 .env.*
+!.env.example
 !.env.*.example
+
+# Backup files
+*.env.bak
+*.env.backup
 
 # OS
 .DS_Store

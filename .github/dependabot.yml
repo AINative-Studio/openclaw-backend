@@ -1,0 +1,175 @@
+# Dependabot Configuration for OpenClaw Backend
+# Automatically checks for dependency updates and security vulnerabilities
+# See: https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+
+    # Security updates get priority
+    # Group non-security updates to reduce PR noise
+    groups:
+      # Critical security packages - individual PRs
+      security-critical:
+        patterns:
+          - "cryptography"
+          - "sqlalchemy"
+          - "fastapi"
+          - "pydantic"
+          - "python-jose"
+        update-types:
+          - "security"
+
+      # Production dependencies - weekly batch
+      production-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+        exclude-patterns:
+          - "cryptography"
+          - "sqlalchemy"
+          - "fastapi"
+          - "pydantic"
+          - "python-jose"
+
+      # Development dependencies - less urgent
+      development:
+        dependency-type: "development"
+        patterns:
+          - "pytest*"
+          - "coverage"
+          - "pip-audit"
+          - "safety"
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Labeling strategy
+    labels:
+      - "dependencies"
+      - "security"
+      - "python"
+
+    # Reviewers (update with your team)
+    # reviewers:
+    #   - "security-team"
+    #   - "backend-team"
+
+    # Auto-merge for patch updates of non-critical packages
+    # (requires GitHub Actions workflow)
+    # allow:
+    #   - dependency-type: "production"
+    #     update-type: "security:patch"
+
+    # Ignore specific versions or packages if needed
+    ignore:
+      # ecdsa has unfixable CVE - ignore until alternative found
+      - dependency-name: "ecdsa"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+        # Still allow security patches if they appear
+
+      # Don't upgrade to major versions automatically - requires testing
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+    # Custom commit message format
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+
+    # Pull request settings
+    pull-request-branch-name:
+      separator: "/"
+
+    target-branch: "main"
+
+    # Rebase strategy for merge conflicts
+    rebase-strategy: "auto"
+
+  # GitHub Actions workflows (if present)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 5
+
+  # Docker (if Dockerfile present)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "03:00"
+      timezone: "UTC"
+    labels:
+      - "dependencies"
+      - "docker"
+    open-pull-requests-limit: 5
+
+  # Node.js for OpenClaw Gateway
+  - package-ecosystem: "npm"
+    directory: "/openclaw-gateway"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "03:00"
+      timezone: "UTC"
+    groups:
+      # DBOS SDK - critical, individual PRs
+      dbos-critical:
+        patterns:
+          - "@dbos-inc/*"
+        update-types:
+          - "security"
+          - "minor"
+
+      # Other dependencies
+      node-production:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+        exclude-patterns:
+          - "@dbos-inc/*"
+    labels:
+      - "dependencies"
+      - "nodejs"
+      - "gateway"
+    open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+# Configuration Notes:
+# 1. Security updates are checked DAILY and get individual PRs
+# 2. Non-security updates are grouped to reduce noise
+# 3. Major version updates are ignored (require manual review)
+# 4. ecdsa updates ignored due to unfixable CVE (documented in audit)
+# 5. Each ecosystem runs on different days to avoid overwhelming CI/CD
+#
+# Integration:
+# - Requires GitHub Actions for auto-merge (optional)
+# - Configure branch protection rules to require CI checks
+# - Set up CODEOWNERS file for automatic reviewer assignment
+#
+# Monitoring:
+# - Check the Insights > Dependency graph > Dependabot tab
+# - Review security alerts in the Security tab
+# - Configure notifications for your team

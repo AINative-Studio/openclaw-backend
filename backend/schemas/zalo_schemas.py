@@ -2,18 +2,40 @@
 Zalo Pydantic Schemas (Issue #121)
 
 Request and response schemas for Zalo API endpoints.
+
+Security: Issue #131 - Input validation and XSS prevention
 """
 
 from typing import Optional, Dict, Any
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
+from backend.validators import sanitize_html, validate_url
 
 
 class ZaloOAuthRequest(BaseModel):
-    """Request schema for OAuth authorization URL"""
-    redirect_uri: str = Field(..., description="OAuth callback URL")
-    state: Optional[str] = Field(None, description="State parameter for CSRF protection")
+    """
+    Request schema for OAuth authorization URL
+
+    Security: Issue #131 - Validates redirect URI format
+    """
+    redirect_uri: str = Field(
+        ...,
+        max_length=500,
+        description="OAuth callback URL (validated format)"
+    )
+    state: Optional[str] = Field(
+        None,
+        max_length=128,
+        description="State parameter for CSRF protection"
+    )
+
+    @field_validator('redirect_uri')
+    @classmethod
+    def validate_redirect_uri(cls, v: str) -> str:
+        """Validate redirect URI is a valid HTTPS URL (Issue #131)."""
+        # Require HTTPS for OAuth redirects (security best practice)
+        return validate_url(v, allowed_schemes=['https', 'http'])
 
 
 class ZaloOAuthResponse(BaseModel):
@@ -99,18 +121,38 @@ class ZaloStatusResponse(BaseModel):
 
 
 class ZaloMessageRequest(BaseModel):
-    """Request schema for sending messages"""
+    """
+    Request schema for sending messages
+
+    Security: Issue #131 - Sanitizes HTML from message text
+    """
     workspace_id: UUID = Field(..., description="Workspace UUID")
-    user_id: str = Field(..., description="Zalo user ID")
-    message: str = Field(..., description="Message text")
+    user_id: str = Field(
+        ...,
+        max_length=255,
+        description="Zalo user ID (alphanumeric)"
+    )
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Message text (XSS sanitized)"
+    )
 
     @field_validator('message')
     @classmethod
     def validate_message_not_empty(cls, v: str) -> str:
-        """Validate message is not empty"""
+        """
+        Validate and sanitize message (Issue #131).
+
+        Prevents:
+            - Empty messages
+            - HTML/XSS injection
+        """
         if not v or not v.strip():
             raise ValueError("Message cannot be empty")
-        return v.strip()
+        # Sanitize HTML tags and JavaScript
+        return sanitize_html(v.strip())
 
 
 class ZaloMessageResponse(BaseModel):

@@ -14,6 +14,9 @@ from uuid import UUID
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
 from sqlalchemy.orm import Session
 
 from backend.db.base import get_db
@@ -55,6 +58,7 @@ def _serialize_member(member) -> dict:
     description="Get a list of all team members with their roles and status"
 )
 async def list_team_members(
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> TeamMembersListResponse:
     """
@@ -87,9 +91,8 @@ async def list_team_members(
 )
 async def invite_member(
     request: InviteMemberRequest,
-    db: Session = Depends(get_db),
-    # TODO: Add current_user dependency for authentication
-    # current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ) -> InviteMemberResponse:
     """
     Invite a new team member
@@ -151,8 +154,8 @@ async def invite_member(
 )
 async def remove_member(
     member_id: str,
-    db: Session = Depends(get_db),
-    # TODO: Add current_user dependency
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ) -> RemoveMemberResponse:
     """
     Remove a team member
@@ -220,8 +223,8 @@ async def remove_member(
 async def update_member_role(
     member_id: str,
     request: UpdateRoleRequest,
-    db: Session = Depends(get_db),
-    # TODO: Add current_user dependency
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ) -> TeamMemberResponse:
     """
     Update a team member's role

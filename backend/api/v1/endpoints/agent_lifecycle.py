@@ -11,16 +11,21 @@ delete (soft), and execute heartbeat.
 import logging
 import uuid
 from typing import Optional
+from uuid import UUID as UUIDType
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+
+from backend.security.auth_dependencies import get_current_active_user
+from backend.security.authorization_service import verify_agent_access, AuthorizationService
+from backend.models.user import User
 
 logger = logging.getLogger(__name__)
 
 try:
     from backend.db.base import get_db
     from backend.services.agent_lifecycle_api_service import AgentLifecycleApiService
-    from backend.schemas.agent_lifecycle import (
+    from backend.schemas.agent_swarm_lifecycle import (
         AgentResponse,
         AgentListResponse,
         CreateAgentRequest,
@@ -28,7 +33,7 @@ try:
         HeartbeatExecutionResponse,
     )
     from pydantic import BaseModel
-    from backend.models.agent_lifecycle import AgentSwarmInstance
+    from backend.models.agent_swarm_lifecycle import AgentSwarmInstance
     AGENT_LIFECYCLE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError) as e:
     logger.warning(f"Agent lifecycle service not available: {e}")
@@ -36,7 +41,8 @@ except (ImportError, ModuleNotFoundError) as e:
 
 router = APIRouter(prefix="/agents", tags=["Agents", "Lifecycle"])
 
-DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
+# Convert string to UUID object for SQLAlchemy
+DEFAULT_USER_ID = UUIDType("00000000-0000-0000-0000-000000000001")
 
 
 def _agent_to_response(agent: "AgentSwarmInstance") -> "AgentResponse":
@@ -54,6 +60,7 @@ def _agent_to_response(agent: "AgentSwarmInstance") -> "AgentResponse":
         persona=agent.persona,
         model=agent.model,
         user_id=str(agent.user_id),
+        workspace_id=str(agent.workspace_id) if agent.workspace_id else None,
         status=agent.status.value if hasattr(agent.status, "value") else str(agent.status),
         openclaw_session_key=agent.openclaw_session_key,
         openclaw_agent_id=agent.openclaw_agent_id,
@@ -95,12 +102,22 @@ def list_agents(
     agent_status: Optional[str] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> AgentListResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
-        agents, total = service.list_agents(status=agent_status, limit=limit, offset=offset)
+
+        # Filter by current user's workspace (Issue #130 - IDOR prevention)
+        # Agents should only list from the user's workspace
+        agents, total = service.list_agents(
+            status=agent_status,
+            limit=limit,
+            offset=offset,
+            user_id=current_user.id,  # Filter by current user
+            workspace_id=current_user.workspace_id  # Filter by workspace
+        )
         return AgentListResponse(
             agents=[_agent_to_response(a) for a in agents],
             total=total,
@@ -121,7 +138,11 @@ def list_agents(
     status_code=status.HTTP_200_OK,
     summary="Get agent detail",
 )
-def get_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
+def get_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> AgentResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
@@ -131,6 +152,10 @@ def get_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found",
             )
+
+        # Verify agent access (Issue #130 - IDOR prevention)
+        verify_agent_access(agent, current_user, require_ownership=False)
+
         return _agent_to_response(agent)
     except HTTPException:
         raise
@@ -148,14 +173,22 @@ def get_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Create agent",
 )
-def create_agent(
+async def create_agent(
     request: CreateAgentRequest,
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
-        agent = service.create_agent(user_id=DEFAULT_USER_ID, request=request)
+
+        # Use authenticated user's ID instead of default (Issue #130 - IDOR prevention)
+        agent = service.create_agent(user_id=current_user.id, request=request)
+
+        # Auto-provision the agent after creation
+        logger.info(f"Auto-provisioning agent {agent.id} after creation")
+        agent = await service.provision_agent(str(agent.id))
+
         return _agent_to_response(agent)
     except Exception as e:
         logger.error(f"Error creating agent: {e}", exc_info=True)
@@ -171,16 +204,27 @@ def create_agent(
     status_code=status.HTTP_200_OK,
     summary="Provision agent",
 )
-async def provision_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
+async def provision_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> AgentResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
-        agent = await service.provision_agent(agent_id)
+
+        # First fetch agent to check ownership (Issue #130)
+        agent = service.get_agent(agent_id)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found",
             )
+        # Require ownership for modifying agent
+        verify_agent_access(agent, current_user, require_ownership=True)
+
+        # Now provision it
+        agent = await service.provision_agent(agent_id)
         return _agent_to_response(agent)
     except HTTPException:
         raise
@@ -203,7 +247,11 @@ async def provision_agent(agent_id: str, db: Session = Depends(get_db)) -> Agent
     status_code=status.HTTP_200_OK,
     summary="Pause running agent",
 )
-def pause_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
+def pause_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> AgentResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
@@ -235,7 +283,11 @@ def pause_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
     status_code=status.HTTP_200_OK,
     summary="Resume paused agent",
 )
-def resume_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
+def resume_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> AgentResponse:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
@@ -270,6 +322,7 @@ def resume_agent(agent_id: str, db: Session = Depends(get_db)) -> AgentResponse:
 def update_agent_settings(
     agent_id: str,
     request: UpdateAgentSettingsRequest,
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
     _check_available()
@@ -297,7 +350,11 @@ def update_agent_settings(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete agent (soft delete)",
 )
-def delete_agent(agent_id: str, db: Session = Depends(get_db)) -> None:
+def delete_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> None:
     _check_available()
     try:
         service = AgentLifecycleApiService(db)
@@ -324,7 +381,9 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db)) -> None:
     summary="Execute heartbeat",
 )
 def execute_heartbeat(
-    agent_id: str, db: Session = Depends(get_db)
+    agent_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ) -> HeartbeatExecutionResponse:
     _check_available()
     try:
@@ -370,6 +429,7 @@ class SendMessageResponse(BaseModel):
 async def send_message(
     agent_id: str,
     request: SendMessageRequest,
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> SendMessageResponse:
     _check_available()

@@ -304,3 +304,24 @@ class NodeCrashDetectionService:
         if limit:
             history = history[-limit:]
         return history
+
+# Global service instance
+_node_crash_detection_service: Optional[NodeCrashDetectionService] = None
+
+
+def get_node_crash_detection_service() -> NodeCrashDetectionService:
+    """
+    Get global node crash detection service instance
+    
+    Returns:
+        NodeCrashDetectionService instance
+    """
+    global _node_crash_detection_service
+    
+    if _node_crash_detection_service is None:
+        _node_crash_detection_service = NodeCrashDetectionService(
+            crash_threshold_seconds=60,
+            max_history_size=100
+        )
+    
+    return _node_crash_detection_service

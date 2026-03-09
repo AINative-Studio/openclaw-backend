@@ -14,16 +14,16 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from backend.models.agent_lifecycle import (
+from backend.models.agent_swarm_lifecycle import (
     AgentSwarmInstance,
     AgentSwarmStatus,
     HeartbeatInterval,
 )
-from backend.schemas.agent_lifecycle import (
+from backend.schemas.agent_swarm_lifecycle import (
     CreateAgentRequest,
     UpdateAgentSettingsRequest,
 )
-from integrations.openclaw_bridge import OpenClawBridge
+from integrations.openclaw_cli_bridge import OpenClawCLIBridge
 from backend.clients.dbos_workflow_client import (
     get_dbos_client,
     WorkflowEndpointUnavailableError,
@@ -66,8 +66,18 @@ class AgentLifecycleApiService:
         return agents, total
 
     def get_agent(self, agent_id: str) -> Optional[AgentSwarmInstance]:
+        from uuid import UUID
+        # Convert string to UUID if it's a valid UUID string
+        try:
+            if isinstance(agent_id, str):
+                uuid_id = UUID(agent_id)
+            else:
+                uuid_id = agent_id
+        except (ValueError, AttributeError):
+            return None
+
         return self.db.query(AgentSwarmInstance).filter(
-            AgentSwarmInstance.id == agent_id
+            AgentSwarmInstance.id == uuid_id
         ).first()
 
     def create_agent(
@@ -101,7 +111,7 @@ class AgentLifecycleApiService:
             agent_id = f"{agent_id}-{suffix}"
 
         agent = AgentSwarmInstance(
-            id=str(uuid4()),
+            id=uuid4(),  # UUID object, not string
             name=request.name,
             persona=request.persona,
             model=request.model,
@@ -323,18 +333,18 @@ class AgentLifecycleApiService:
         }
 
     async def send_message_to_agent(self, agent_id: str, message: str) -> dict:
-        """Send a message to an agent via OpenClaw Gateway
+        """Send a message to an agent via OpenClaw Gateway and persist to database
 
         Implements production-ready communication with OpenClaw Gateway Protocol v3.
         Authenticates with the gateway, sends the message to the agent's session,
-        and returns the agent's response.
+        persists both user message and agent response to conversation history.
 
         Args:
             agent_id: ID of the agent to send message to
             message: Message content to send
 
         Returns:
-            dict with response, status, runId, and messageId
+            dict with response, status, runId, messageId, and conversation_id
 
         Raises:
             ValueError: If agent not found, not provisioned, or not running
@@ -353,50 +363,174 @@ class AgentLifecycleApiService:
                 "Agent must be 'running'."
             )
 
-        # Get gateway URL from environment
-        gateway_url = os.getenv("OPENCLAW_GATEWAY_URL", "ws://localhost:18789")
-        gateway_token = os.getenv("OPENCLAW_TOKEN")
+        # Get or create conversation for this agent
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from backend.services.conversation_service_pg import ConversationServicePG
+        from uuid import UUID as UUIDType
 
-        # Convert http:// to ws:// if needed
-        if gateway_url.startswith("http://"):
-            gateway_url = gateway_url.replace("http://", "ws://")
-        elif gateway_url.startswith("https://"):
-            gateway_url = gateway_url.replace("https://", "wss://")
+        # Convert agent_id string to UUID
+        agent_uuid = UUIDType(str(agent.id))
 
-        # Create bridge client and connect
-        bridge = OpenClawBridge(url=gateway_url, token=gateway_token)
+        # Create async session for conversation service
+        from backend.db.base import AsyncSessionLocal
+        async with AsyncSessionLocal() as conv_db:
+            conv_service = ConversationServicePG(db=conv_db)
 
-        try:
-            # Connect with proper authentication
-            await bridge.connect()
+            # Get or create conversation
+            conversation = await conv_service.get_conversation_by_agent(agent_uuid)
+            if not conversation:
+                # Create new conversation (use default workspace for now)
+                default_workspace_id = UUIDType("dc17346c-f46c-4cd4-9277-a2efcaadfbb2")
+                conversation = await conv_service.create_conversation(
+                    workspace_id=default_workspace_id,
+                    agent_id=agent_uuid,
+                    user_id=UUIDType(str(agent.user_id)) if agent.user_id else None
+                )
 
-            # Send message to agent and wait for final response
-            result = await bridge.send_to_agent(
-                session_key=agent.openclaw_session_key,
-                message=message,
-                timeout_seconds=600
+            # Save user message
+            await conv_service.add_message(
+                conversation_id=conversation.id,
+                role="user",
+                content=message,
+                metadata={}
             )
 
-            # Extract response text from payloads
-            # Result structure: {result: {payloads: [{text: "..."}], meta: {...}}}
-            payloads = result.get("result", {}).get("payloads", [])
-            response_parts = []
+        # Development mode bypass - return mock response if OPENCLAW_MOCK_AGENT is set
+        if os.getenv("OPENCLAW_MOCK_AGENT") == "true":
+            logger.info(f"Mock mode: Simulating agent response for message: {message[:50]}...")
+            mock_response = f"Hello! I'm {agent.name}. I received your message: '{message}'. This is a mock response while the full OpenClaw Gateway integration is being set up."
 
-            for payload in payloads:
-                text = payload.get("text", "")
-                if text:
-                    response_parts.append(text)
-
-            response_text = "\n".join(response_parts) if response_parts else "No response received from agent."
+            # Save mock response
+            async with AsyncSessionLocal() as conv_db:
+                conv_service = ConversationServicePG(db=conv_db)
+                await conv_service.add_message(
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=mock_response,
+                    metadata={}
+                )
 
             return {
-                "response": response_text,
+                "response": mock_response,
                 "status": "completed",
-                "runId": result.get("runId"),
-                "payloads": payloads,
-                "meta": result.get("result", {}).get("meta", {})
+                "runId": f"mock-run-{uuid4()}",
+                "messageId": f"mock-msg-{uuid4()}",
+                "conversation_id": str(conversation.id)
             }
 
-        finally:
-            # Always close the connection
-            await bridge.close()
+        # Phase 2: Use Gateway /chat workflow with DBOS durability + personality + memory
+        gateway_url = os.getenv("OPENCLAW_GATEWAY_URL", "http://localhost:18789")
+
+        import httpx
+
+        try:
+            async with httpx.AsyncClient() as http_client:
+                # Call Gateway DBOS chat workflow
+                response = await http_client.post(
+                    f"{gateway_url}/chat",
+                    json={
+                        "conversationId": str(conversation.id),
+                        "agentId": str(agent.id),
+                        "workspaceId": str(agent.workspace_id) if hasattr(agent, 'workspace_id') and agent.workspace_id else str(conversation.workspace_id),
+                        "userId": str(agent.user_id) if agent.user_id else None,
+                        "message": message,
+                        "conversationHistory": []  # Gateway loads from ZeroDB automatically
+                    },
+                    timeout=60.0
+                )
+
+                if not response.is_success:
+                    error_text = response.text
+                    logger.error(f"Gateway /chat failed: {response.status_code} - {error_text}")
+
+                    # Fallback: Try CLI bridge if Gateway is down
+                    logger.warning("Gateway /chat unavailable, falling back to CLI bridge")
+                    bridge = OpenClawCLIBridge()
+                    try:
+                        result = await bridge.send_to_agent(
+                            session_key=agent.openclaw_session_key,
+                            message=message,
+                            timeout_seconds=600
+                        )
+                        response_text = result.get("response", "No response received from agent.")
+                        raw_result = result.get("raw_result", {})
+                        run_id = raw_result.get("runId", f"cli-run-{uuid4()}")
+                        message_id = f"cli-msg-{uuid4()}"
+
+                        # Save fallback response
+                        async with AsyncSessionLocal() as conv_db:
+                            conv_service = ConversationServicePG(db=conv_db)
+                            await conv_service.add_message(
+                                conversation_id=conversation.id,
+                                role="assistant",
+                                content=response_text,
+                                metadata={"run_id": run_id, "message_id": message_id, "fallback": True}
+                            )
+
+                        return {
+                            "response": response_text,
+                            "status": raw_result.get("status", "completed"),
+                            "runId": run_id,
+                            "messageId": message_id,
+                            "conversation_id": str(conversation.id)
+                        }
+                    finally:
+                        await bridge.close()
+
+                # Gateway success - response already saved by workflow
+                data = response.json()
+
+                logger.info(
+                    f"Gateway /chat completed: {data.get('processingTimeMs')}ms, "
+                    f"{data.get('tokensUsed')} tokens, "
+                    f"workflow={data.get('workflowUuid')}"
+                )
+
+                return {
+                    "response": data["response"],
+                    "status": "completed",
+                    "runId": data.get("workflowUuid", f"dbos-{uuid4()}"),
+                    "messageId": data["assistantMessageId"],
+                    "conversation_id": str(conversation.id)
+                }
+
+        except httpx.ConnectError as e:
+            # Gateway connection failed - fallback to CLI bridge
+            logger.error(f"Cannot connect to Gateway at {gateway_url}: {e}")
+            logger.warning("Gateway unreachable, falling back to CLI bridge")
+
+            bridge = OpenClawCLIBridge()
+            try:
+                result = await bridge.send_to_agent(
+                    session_key=agent.openclaw_session_key,
+                    message=message,
+                    timeout_seconds=600
+                )
+                response_text = result.get("response", "No response received from agent.")
+                raw_result = result.get("raw_result", {})
+                run_id = raw_result.get("runId", f"cli-run-{uuid4()}")
+                message_id = f"cli-msg-{uuid4()}"
+
+                # Save fallback response
+                async with AsyncSessionLocal() as conv_db:
+                    conv_service = ConversationServicePG(db=conv_db)
+                    await conv_service.add_message(
+                        conversation_id=conversation.id,
+                        role="assistant",
+                        content=response_text,
+                        metadata={"run_id": run_id, "message_id": message_id, "fallback": True}
+                    )
+
+                return {
+                    "response": response_text,
+                    "status": raw_result.get("status", "completed"),
+                    "runId": run_id,
+                    "messageId": message_id,
+                    "conversation_id": str(conversation.id)
+                }
+            finally:
+                await bridge.close()
+
+        except Exception as e:
+            logger.error(f"Gateway /chat error: {e}", exc_info=True)
+            raise ValueError(f"Failed to send message via Gateway: {str(e)}")

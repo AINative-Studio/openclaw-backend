@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from backend.models.task_models import Task, TaskStatus
+from backend.models.task_queue import Task, TaskStatus
 
 
 # Configure logging
@@ -177,7 +177,7 @@ class DuplicatePreventionService:
 
             return TaskCreationResult(
                 is_new_task=True,
-                task_id=new_task.task_id,
+                task_id=str(new_task.id),  # Convert UUID to string
                 duplicate_of=None,
                 idempotency_key=idempotency_key,
                 created_at=new_task.created_at or datetime.now(timezone.utc),
@@ -297,8 +297,8 @@ class DuplicatePreventionService:
 
         return TaskCreationResult(
             is_new_task=False,
-            task_id=existing_task.task_id,  # Return existing task_id
-            duplicate_of=existing_task.task_id,
+            task_id=str(existing_task.id),  # Return existing id (UUID as string)
+            duplicate_of=str(existing_task.id),
             idempotency_key=idempotency_key,
             created_at=existing_task.created_at or datetime.now(timezone.utc),
         )
@@ -327,7 +327,7 @@ class DuplicatePreventionService:
             attempted_payload: Payload client attempted to submit
         """
         duplicate_metadata = {
-            "existing_task_id": existing_task.task_id,
+            "existing_task_id": str(existing_task.id),
             "attempted_task_id": attempted_task_id,
             "idempotency_key": idempotency_key,
             "existing_status": existing_task.status,
@@ -346,13 +346,13 @@ class DuplicatePreventionService:
         logger.warning(
             f"Duplicate task submission detected: "
             f"idempotency_key={idempotency_key}, "
-            f"existing_task_id={existing_task.task_id}, "
+            f"existing_task_id={str(existing_task.id)}, "
             f"attempted_task_id={attempted_task_id}",
             extra=duplicate_metadata,
         )
 
         logger.info(
-            f"Returning existing task_id={existing_task.task_id} for duplicate "
+            f"Returning existing task_id={str(existing_task.id)} for duplicate "
             f"submission with idempotency_key={idempotency_key}"
         )
 
@@ -401,16 +401,49 @@ class DuplicatePreventionService:
         Returns:
             Dictionary with duplicate statistics
         """
-        total_tasks = self.db_session.query(Task).count()
-        unique_keys = (
-            self.db_session.query(Task.idempotency_key).distinct().count()
-        )
+        try:
+            # Clear any stale transaction state before querying
+            self.db_session.expire_all()  # Expire all cached objects
+            self.db_session.rollback()    # Clear any pending transaction state
 
-        # In a proper implementation, unique_keys should equal total_tasks
-        # due to unique constraint. Any difference indicates historical issues.
-        return {
-            "total_tasks": total_tasks,
-            "unique_idempotency_keys": unique_keys,
-            "potential_duplicates_prevented": 0,  # Tracked via metrics in production
-            "duplicate_prevention_active": True,
-        }
+            total_tasks = self.db_session.query(Task).count()
+            unique_keys = (
+                self.db_session.query(Task.idempotency_key).distinct().count()
+            )
+
+            # In a proper implementation, unique_keys should equal total_tasks
+            # due to unique constraint. Any difference indicates historical issues.
+            return {
+                "total_tasks": total_tasks,
+                "unique_idempotency_keys": unique_keys,
+                "potential_duplicates_prevented": 0,  # Tracked via metrics in production
+                "duplicate_prevention_active": True,
+            }
+        except Exception as e:
+            self.db_session.rollback()  # Ensure rollback on error
+            logger.error(
+                "Database error retrieving duplicate prevention statistics",
+                extra={"error": str(e)}
+            )
+            # Return degraded stats instead of raising
+            return {
+                "total_tasks": 0,
+                "unique_idempotency_keys": 0,
+                "potential_duplicates_prevented": 0,
+                "duplicate_prevention_active": False,
+                "error": str(e)
+            }
+
+def get_duplicate_prevention_service() -> DuplicatePreventionService:
+    """
+    Get duplicate prevention service instance with fresh database session
+
+    Creates a new database session for each call to avoid transaction
+    state issues. The caller is responsible for closing the session.
+
+    Returns:
+        DuplicatePreventionService instance with new database session
+    """
+    from backend.db.base import SessionLocal
+    db_session = SessionLocal()
+    return DuplicatePreventionService(db_session=db_session)

@@ -2,13 +2,20 @@
 Skill Installation Schemas
 
 Pydantic models for skill installation requests and responses.
+
+Security: Issue #131 - Input validation for skill names and paths
 """
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any, Literal
+from pydantic import BaseModel, Field, field_validator
+from backend.validators import validate_alphanumeric_id
 
 
 class SkillInstallRequest(BaseModel):
-    """Request to install a skill"""
+    """
+    Request to install a skill
+
+    Security: Issue #131 - Validates timeout ranges
+    """
     force: bool = Field(
         default=False,
         description="Force reinstallation even if already installed"
@@ -17,28 +24,35 @@ class SkillInstallRequest(BaseModel):
         default=300,
         ge=30,
         le=600,
-        description="Installation timeout in seconds (30-600)"
+        description="Installation timeout in seconds (30-600, validated)"
     )
 
 
 class SkillInstallResponse(BaseModel):
-    """Response from skill installation attempt"""
+    """
+    Response from skill installation attempt
+
+    Security: Issue #131 - Validates method enum and log size
+    """
     success: bool = Field(
         description="Whether the installation succeeded"
     )
     message: str = Field(
+        max_length=1000,
         description="Human-readable success/error message"
     )
     logs: List[str] = Field(
         default_factory=list,
-        description="Installation logs (stdout/stderr)"
+        max_length=100,
+        description="Installation logs (stdout/stderr, max 100 lines)"
     )
-    method: Optional[str] = Field(
+    method: Optional[Literal["go", "npm", "pip", "manual"]] = Field(
         None,
-        description="Installation method used (go, npm, manual)"
+        description="Installation method used (enforced enum)"
     )
     package: Optional[str] = Field(
         None,
+        max_length=500,
         description="Package name/path that was installed"
     )
 
@@ -75,22 +89,26 @@ class SkillInstallProgress(BaseModel):
     """
     Progress update for streaming installation
     (Future enhancement - not implemented yet)
+
+    Security: Issue #131 - Validates status enum and progress range
     """
-    skill_name: str
-    status: str = Field(
-        description="Status: queued, installing, completed, failed"
+    skill_name: str = Field(max_length=255)
+    status: Literal["queued", "installing", "completed", "failed"] = Field(
+        description="Status (enforced enum)"
     )
     progress_percent: int = Field(
         ge=0,
         le=100,
-        description="Installation progress percentage"
+        description="Installation progress percentage (0-100)"
     )
     current_step: str = Field(
+        max_length=500,
         description="Current installation step"
     )
     logs: List[str] = Field(
         default_factory=list,
-        description="Recent log lines"
+        max_length=20,
+        description="Recent log lines (max 20)"
     )
 
 

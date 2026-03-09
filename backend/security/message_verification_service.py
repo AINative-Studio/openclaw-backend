@@ -212,3 +212,25 @@ class MessageVerificationService:
             "cache_size": len(self._key_cache),
             "cache_hits": self._key_cache_hits
         }
+
+# Global service instance
+_message_verification_service: Optional[MessageVerificationService] = None
+
+
+def get_message_verification_service() -> MessageVerificationService:
+    """
+    Get global message verification service instance
+    
+    Returns:
+        MessageVerificationService instance
+    """
+    global _message_verification_service
+    
+    if _message_verification_service is None:
+        from backend.security.peer_key_store import PeerKeyStore
+        peer_key_store = PeerKeyStore()
+        _message_verification_service = MessageVerificationService(
+            peer_key_store=peer_key_store
+        )
+    
+    return _message_verification_service

@@ -10,6 +10,9 @@ from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, status
 
+from backend.security.auth_dependencies import get_current_active_user
+from backend.models.user import User
+
 from backend.schemas.channel_schemas import (
     ChannelListResponse,
     ChannelConfigRequest,
@@ -49,7 +52,8 @@ router = APIRouter()
 
 
 @router.get("/channels", response_model=ChannelListResponse, status_code=status.HTTP_200_OK)
-async def list_channels():
+async def list_channels(
+    current_user: User = Depends(get_current_active_user)):
     """
     List all available channels with their current status.
 
@@ -97,7 +101,8 @@ async def list_channels():
     response_model=ChannelResponse,
     status_code=status.HTTP_201_CREATED
 )
-async def enable_channel(channel_id: str, request: ChannelConfigRequest):
+async def enable_channel(channel_id: str, request: ChannelConfigRequest,
+    current_user: User = Depends(get_current_active_user)):
     """
     Enable a channel globally with provided configuration.
 
@@ -160,7 +165,8 @@ async def enable_channel(channel_id: str, request: ChannelConfigRequest):
     response_model=ChannelResponse,
     status_code=status.HTTP_200_OK
 )
-async def disable_channel(channel_id: str):
+async def disable_channel(channel_id: str,
+    current_user: User = Depends(get_current_active_user)):
     """
     Disable a channel globally (preserves configuration).
 
@@ -209,7 +215,8 @@ async def disable_channel(channel_id: str):
     response_model=ChannelStatusResponse,
     status_code=status.HTTP_200_OK
 )
-async def get_channel_status(channel_id: str):
+async def get_channel_status(channel_id: str,
+    current_user: User = Depends(get_current_active_user)):
     """
     Get real-time channel status from OpenClaw Gateway.
 
@@ -253,7 +260,8 @@ async def get_channel_status(channel_id: str):
     response_model=ChannelResponse,
     status_code=status.HTTP_200_OK
 )
-async def update_channel_config(channel_id: str, request: ChannelConfigRequest):
+async def update_channel_config(channel_id: str, request: ChannelConfigRequest,
+    current_user: User = Depends(get_current_active_user)):
     """
     Update channel configuration (supports partial updates).
 
@@ -433,7 +441,8 @@ async def disconnect_channel(channel_id: str):
     response_model=Dict[str, Any],
     status_code=status.HTTP_200_OK
 )
-async def test_channel_connection(channel_id: str):
+async def test_channel_connection(channel_id: str,
+    current_user: User = Depends(get_current_active_user)):
     """
     Test channel connection (Issue #98).
 

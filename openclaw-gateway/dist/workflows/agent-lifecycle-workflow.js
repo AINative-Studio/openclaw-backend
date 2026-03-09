@@ -15,7 +15,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
-import { Workflow, Step, Communicator } from '@dbos-inc/dbos-sdk';
+import { DBOS } from '@dbos-inc/dbos-sdk';
 /**
  * Agent Lifecycle Workflow Class
  *
@@ -31,8 +31,8 @@ export class AgentLifecycleWorkflow {
     /**
      * Validate provisioning request
      */
-    static async validateProvisionRequest(ctx, request) {
-        ctx.logger.info(`Validating provision request for agent ${request.agentId}`);
+    static async validateProvisionRequest(request) {
+        DBOS.logger.info(`Validating provision request for agent ${request.agentId}`);
         if (!request.agentId || !request.name || !request.model || !request.userId || !request.sessionKey) {
             throw new Error('Invalid provision request: missing required fields');
         }
@@ -44,9 +44,9 @@ export class AgentLifecycleWorkflow {
     /**
      * Store agent metadata in database
      */
-    static async storeAgentMetadata(ctx, request) {
-        ctx.logger.info(`Storing agent metadata for ${request.agentId}`);
-        await ctx.query(`INSERT INTO dbos_agents (
+    static async storeAgentMetadata(request) {
+        DBOS.logger.info(`Storing agent metadata for ${request.agentId}`);
+        await DBOS.query(`INSERT INTO dbos_agents (
         agent_id, name, persona, model, user_id, session_key,
         heartbeat_enabled, heartbeat_interval, heartbeat_checklist,
         configuration, workflow_uuid, status, created_at
@@ -65,17 +65,16 @@ export class AgentLifecycleWorkflow {
             request.heartbeatInterval,
             JSON.stringify(request.heartbeatChecklist || []),
             JSON.stringify(request.configuration || {}),
-            ctx.workflowUUID,
+            DBOS.workflowID,
             'provisioning'
         ]);
     }
     /**
-     * Connect agent channels (communicator for external API calls)
+     * Connect agent channels (external API calls allowed in steps)
      */
-    static async connectAgentChannels(ctx, request) {
-        ctx.logger.info(`Connecting channels for agent ${request.agentId}`);
+    static async connectAgentChannels(request) {
+        DBOS.logger.info(`Connecting channels for agent ${request.agentId}`);
         // Simulate channel connection (in production, this would call OpenClaw API)
-        // This is a communicator, so it can make external HTTP calls
         const openclawAgentId = `openclaw_${request.agentId}_${Date.now()}`;
         // Simulate API call delay
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -84,12 +83,12 @@ export class AgentLifecycleWorkflow {
     /**
      * Start heartbeat monitoring if enabled
      */
-    static async startHeartbeatMonitoring(ctx, request) {
+    static async startHeartbeatMonitoring(request) {
         if (!request.heartbeatEnabled) {
-            ctx.logger.info(`Heartbeat not enabled for agent ${request.agentId}`);
+            DBOS.logger.info(`Heartbeat not enabled for agent ${request.agentId}`);
             return;
         }
-        ctx.logger.info(`Starting heartbeat monitoring for agent ${request.agentId}`);
+        DBOS.logger.info(`Starting heartbeat monitoring for agent ${request.agentId}`);
         // Calculate next heartbeat time
         const intervalMap = {
             '5m': 5 * 60 * 1000,
@@ -100,16 +99,16 @@ export class AgentLifecycleWorkflow {
         };
         const intervalMs = intervalMap[request.heartbeatInterval || '5m'] || 5 * 60 * 1000;
         const nextHeartbeat = new Date(Date.now() + intervalMs);
-        await ctx.query(`UPDATE dbos_agents
+        await DBOS.query(`UPDATE dbos_agents
        SET next_heartbeat_at = $1, updated_at = NOW()
        WHERE agent_id = $2`, [nextHeartbeat, request.agentId]);
     }
     /**
-     * Update agent status to running
+     * Update agent status
      */
-    static async updateAgentStatus(ctx, agentId, status, openclawAgentId, error) {
-        ctx.logger.info(`Updating agent ${agentId} status to ${status}`);
-        await ctx.query(`UPDATE dbos_agents
+    static async updateAgentStatus(agentId, status, openclawAgentId, error) {
+        DBOS.logger.info(`Updating agent ${agentId} status to ${status}`);
+        await DBOS.query(`UPDATE dbos_agents
        SET status = $1,
            openclaw_agent_id = COALESCE($2, openclaw_agent_id),
            error_message = $3,
@@ -126,19 +125,19 @@ export class AgentLifecycleWorkflow {
      * If the process crashes mid-execution, DBOS will automatically resume
      * from the last completed step.
      */
-    static async provisionAgentWorkflow(ctx, request) {
-        ctx.logger.info(`Starting provision workflow for agent ${request.agentId}`);
+    static async provisionAgentWorkflow(request) {
+        DBOS.logger.info(`Starting provision workflow for agent ${request.agentId}`);
         try {
             // Step 1: Validate request
-            await AgentLifecycleWorkflow.validateProvisionRequest(ctx, request);
+            await AgentLifecycleWorkflow.validateProvisionRequest(request);
             // Step 2: Store metadata (idempotent)
-            await AgentLifecycleWorkflow.storeAgentMetadata(ctx, request);
-            // Step 3: Connect channels (external call, uses communicator)
-            const channelResult = await AgentLifecycleWorkflow.connectAgentChannels(ctx, request);
+            await AgentLifecycleWorkflow.storeAgentMetadata(request);
+            // Step 3: Connect channels (external call)
+            const channelResult = await AgentLifecycleWorkflow.connectAgentChannels(request);
             // Step 4: Start heartbeat if enabled
-            await AgentLifecycleWorkflow.startHeartbeatMonitoring(ctx, request);
+            await AgentLifecycleWorkflow.startHeartbeatMonitoring(request);
             // Step 5: Update status to running
-            await AgentLifecycleWorkflow.updateAgentStatus(ctx, request.agentId, 'running', channelResult.openclawAgentId);
+            await AgentLifecycleWorkflow.updateAgentStatus(request.agentId, 'running', channelResult.openclawAgentId);
             const result = {
                 agentId: request.agentId,
                 status: 'provisioned',
@@ -146,14 +145,14 @@ export class AgentLifecycleWorkflow {
                 openclawAgentId: channelResult.openclawAgentId,
                 timestamp: Date.now()
             };
-            ctx.logger.info(`Provision workflow completed for agent ${request.agentId}`, result);
+            DBOS.logger.info(`Provision workflow completed for agent ${request.agentId}`);
             return result;
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            ctx.logger.error(`Provision workflow failed for agent ${request.agentId}`, error);
+            DBOS.logger.error(`Provision workflow failed for agent ${request.agentId}`, error);
             // Update status to failed
-            await AgentLifecycleWorkflow.updateAgentStatus(ctx, request.agentId, 'failed', undefined, errorMessage);
+            await AgentLifecycleWorkflow.updateAgentStatus(request.agentId, 'failed', undefined, errorMessage);
             const result = {
                 agentId: request.agentId,
                 status: 'failed',
@@ -170,9 +169,9 @@ export class AgentLifecycleWorkflow {
     /**
      * Create heartbeat execution record
      */
-    static async createHeartbeatExecution(ctx, request) {
-        ctx.logger.info(`Creating heartbeat execution ${request.executionId}`);
-        await ctx.query(`INSERT INTO dbos_heartbeat_executions (
+    static async createHeartbeatExecution(request) {
+        DBOS.logger.info(`Creating heartbeat execution ${request.executionId}`);
+        await DBOS.query(`INSERT INTO dbos_heartbeat_executions (
         execution_id, agent_id, status, checklist_items,
         workflow_uuid, started_at, created_at
       ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
@@ -183,14 +182,14 @@ export class AgentLifecycleWorkflow {
             request.agentId,
             'running',
             JSON.stringify(request.checklist),
-            ctx.workflowUUID
+            DBOS.workflowID
         ]);
     }
     /**
-     * Execute heartbeat tasks (communicator for external calls)
+     * Execute heartbeat tasks (external calls allowed)
      */
-    static async executeHeartbeatTasks(ctx, request) {
-        ctx.logger.info(`Executing heartbeat tasks for agent ${request.agentId}`);
+    static async executeHeartbeatTasks(request) {
+        DBOS.logger.info(`Executing heartbeat tasks for agent ${request.agentId}`);
         // Simulate heartbeat execution (in production, this would call OpenClaw)
         const result = {
             tasksCompleted: request.checklist.length,
@@ -204,9 +203,9 @@ export class AgentLifecycleWorkflow {
     /**
      * Update heartbeat execution status
      */
-    static async updateHeartbeatExecution(ctx, executionId, status, result, error) {
-        ctx.logger.info(`Updating heartbeat execution ${executionId} to ${status}`);
-        await ctx.query(`UPDATE dbos_heartbeat_executions
+    static async updateHeartbeatExecution(executionId, status, result, error) {
+        DBOS.logger.info(`Updating heartbeat execution ${executionId} to ${status}`);
+        await DBOS.query(`UPDATE dbos_heartbeat_executions
        SET status = $1,
            result = $2,
            error_message = $3,
@@ -218,8 +217,8 @@ export class AgentLifecycleWorkflow {
     /**
      * Schedule next heartbeat
      */
-    static async scheduleNextHeartbeat(ctx, agentId, interval) {
-        ctx.logger.info(`Scheduling next heartbeat for agent ${agentId}`);
+    static async scheduleNextHeartbeat(agentId, interval) {
+        DBOS.logger.info(`Scheduling next heartbeat for agent ${agentId}`);
         const intervalMap = {
             '5m': 5 * 60 * 1000,
             '15m': 15 * 60 * 1000,
@@ -229,7 +228,7 @@ export class AgentLifecycleWorkflow {
         };
         const intervalMs = intervalMap[interval] || 5 * 60 * 1000;
         const nextHeartbeat = new Date(Date.now() + intervalMs);
-        await ctx.query(`UPDATE dbos_agents
+        await DBOS.query(`UPDATE dbos_agents
        SET last_heartbeat_at = NOW(),
            next_heartbeat_at = $1,
            updated_at = NOW()
@@ -241,22 +240,22 @@ export class AgentLifecycleWorkflow {
      * Executes agent heartbeat tasks with durability.
      * Auto-recovers from crashes and ensures heartbeat continuity.
      */
-    static async heartbeatWorkflow(ctx, request) {
-        ctx.logger.info(`Starting heartbeat workflow for agent ${request.agentId}`);
+    static async heartbeatWorkflow(request) {
+        DBOS.logger.info(`Starting heartbeat workflow for agent ${request.agentId}`);
         const startTime = Date.now();
         try {
             // Step 1: Create execution record
-            await AgentLifecycleWorkflow.createHeartbeatExecution(ctx, request);
+            await AgentLifecycleWorkflow.createHeartbeatExecution(request);
             // Step 2: Execute heartbeat tasks
-            const result = await AgentLifecycleWorkflow.executeHeartbeatTasks(ctx, request);
+            const result = await AgentLifecycleWorkflow.executeHeartbeatTasks(request);
             // Step 3: Update execution status
-            await AgentLifecycleWorkflow.updateHeartbeatExecution(ctx, request.executionId, 'completed', result);
+            await AgentLifecycleWorkflow.updateHeartbeatExecution(request.executionId, 'completed', result);
             // Step 4: Schedule next heartbeat
             // Get agent's heartbeat interval from database
-            const agentQuery = await ctx.query(`SELECT heartbeat_interval FROM dbos_agents WHERE agent_id = $1`, [request.agentId]);
+            const agentQuery = await DBOS.query(`SELECT heartbeat_interval FROM dbos_agents WHERE agent_id = $1`, [request.agentId]);
             if (agentQuery.rows.length > 0) {
                 const interval = agentQuery.rows[0].heartbeat_interval || '5m';
-                await AgentLifecycleWorkflow.scheduleNextHeartbeat(ctx, request.agentId, interval);
+                await AgentLifecycleWorkflow.scheduleNextHeartbeat(request.agentId, interval);
             }
             const heartbeatResult = {
                 executionId: request.executionId,
@@ -266,16 +265,16 @@ export class AgentLifecycleWorkflow {
                 result,
                 timestamp: Date.now()
             };
-            ctx.logger.info(`Heartbeat workflow completed for agent ${request.agentId}`, heartbeatResult);
+            DBOS.logger.info(`Heartbeat workflow completed for agent ${request.agentId}`);
             return heartbeatResult;
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            ctx.logger.error(`Heartbeat workflow failed for agent ${request.agentId}`, error);
+            DBOS.logger.error(`Heartbeat workflow failed for agent ${request.agentId}`, error);
             // Update execution to failed
-            await AgentLifecycleWorkflow.updateHeartbeatExecution(ctx, request.executionId, 'failed', undefined, errorMessage);
+            await AgentLifecycleWorkflow.updateHeartbeatExecution(request.executionId, 'failed', undefined, errorMessage);
             // Update agent error tracking
-            await ctx.query(`UPDATE dbos_agents
+            await DBOS.query(`UPDATE dbos_agents
          SET error_count = error_count + 1,
              last_error_at = NOW(),
              updated_at = NOW()
@@ -297,10 +296,10 @@ export class AgentLifecycleWorkflow {
     /**
      * Capture agent state for pause
      */
-    static async captureAgentState(ctx, agentId) {
-        ctx.logger.info(`Capturing state for agent ${agentId}`);
+    static async captureAgentState(agentId) {
+        DBOS.logger.info(`Capturing state for agent ${agentId}`);
         // Query current agent state
-        const result = await ctx.query(`SELECT configuration, heartbeat_enabled, heartbeat_interval,
+        const result = await DBOS.query(`SELECT configuration, heartbeat_enabled, heartbeat_interval,
               next_heartbeat_at, status
        FROM dbos_agents
        WHERE agent_id = $1`, [agentId]);
@@ -320,19 +319,19 @@ export class AgentLifecycleWorkflow {
     /**
      * Store agent state checkpoint
      */
-    static async storeStateCheckpoint(ctx, agentId, state) {
-        ctx.logger.info(`Storing state checkpoint for agent ${agentId}`);
-        await ctx.query(`INSERT INTO dbos_agent_checkpoints (
+    static async storeStateCheckpoint(agentId, state) {
+        DBOS.logger.info(`Storing state checkpoint for agent ${agentId}`);
+        await DBOS.query(`INSERT INTO dbos_agent_checkpoints (
         agent_id, state, workflow_uuid, created_at
-      ) VALUES ($1, $2, $3, NOW())`, [agentId, JSON.stringify(state), ctx.workflowUUID]);
+      ) VALUES ($1, $2, $3, NOW())`, [agentId, JSON.stringify(state), DBOS.workflowID]);
     }
     /**
      * Update agent pause/resume status
      */
-    static async updatePauseResumeStatus(ctx, agentId, action, state) {
-        ctx.logger.info(`Updating agent ${agentId} to ${action}`);
+    static async updatePauseResumeStatus(agentId, action, state) {
+        DBOS.logger.info(`Updating agent ${agentId} to ${action}`);
         if (action === 'pause') {
-            await ctx.query(`UPDATE dbos_agents
+            await DBOS.query(`UPDATE dbos_agents
          SET status = 'paused',
              paused_at = NOW(),
              updated_at = NOW()
@@ -343,7 +342,7 @@ export class AgentLifecycleWorkflow {
             const nextHeartbeat = state?.nextHeartbeatAt
                 ? new Date(state.nextHeartbeatAt)
                 : new Date(Date.now() + 5 * 60 * 1000);
-            await ctx.query(`UPDATE dbos_agents
+            await DBOS.query(`UPDATE dbos_agents
          SET status = 'running',
              paused_at = NULL,
              next_heartbeat_at = $1,
@@ -354,15 +353,15 @@ export class AgentLifecycleWorkflow {
     /**
      * Restore agent state from checkpoint
      */
-    static async restoreAgentState(ctx, agentId) {
-        ctx.logger.info(`Restoring state for agent ${agentId}`);
+    static async restoreAgentState(agentId) {
+        DBOS.logger.info(`Restoring state for agent ${agentId}`);
         // Get latest checkpoint
-        const result = await ctx.query(`SELECT state FROM dbos_agent_checkpoints
+        const result = await DBOS.query(`SELECT state FROM dbos_agent_checkpoints
        WHERE agent_id = $1
        ORDER BY created_at DESC
        LIMIT 1`, [agentId]);
         if (result.rows.length === 0) {
-            ctx.logger.warn(`No checkpoint found for agent ${agentId}`);
+            DBOS.logger.warn(`No checkpoint found for agent ${agentId}`);
             return {};
         }
         return result.rows[0].state;
@@ -373,23 +372,23 @@ export class AgentLifecycleWorkflow {
      * Gracefully pauses or resumes agent with state preservation.
      * Uses DBOS checkpointing to ensure state consistency.
      */
-    static async pauseResumeWorkflow(ctx, request) {
-        ctx.logger.info(`Starting ${request.action} workflow for agent ${request.agentId}`);
+    static async pauseResumeWorkflow(request) {
+        DBOS.logger.info(`Starting ${request.action} workflow for agent ${request.agentId}`);
         try {
             let state = {};
             if (request.action === 'pause') {
                 // Pause: capture and store state
                 if (request.preserveState) {
-                    state = await AgentLifecycleWorkflow.captureAgentState(ctx, request.agentId);
-                    await AgentLifecycleWorkflow.storeStateCheckpoint(ctx, request.agentId, state);
+                    state = await AgentLifecycleWorkflow.captureAgentState(request.agentId);
+                    await AgentLifecycleWorkflow.storeStateCheckpoint(request.agentId, state);
                 }
             }
             else {
                 // Resume: restore state
-                state = await AgentLifecycleWorkflow.restoreAgentState(ctx, request.agentId);
+                state = await AgentLifecycleWorkflow.restoreAgentState(request.agentId);
             }
             // Update agent status
-            await AgentLifecycleWorkflow.updatePauseResumeStatus(ctx, request.agentId, request.action, state);
+            await AgentLifecycleWorkflow.updatePauseResumeStatus(request.agentId, request.action, state);
             const result = {
                 agentId: request.agentId,
                 action: request.action,
@@ -397,12 +396,12 @@ export class AgentLifecycleWorkflow {
                 state: request.preserveState ? state : undefined,
                 timestamp: Date.now()
             };
-            ctx.logger.info(`${request.action} workflow completed for agent ${request.agentId}`, result);
+            DBOS.logger.info(`${request.action} workflow completed for agent ${request.agentId}`);
             return result;
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            ctx.logger.error(`${request.action} workflow failed for agent ${request.agentId}`, error);
+            DBOS.logger.error(`${request.action} workflow failed for agent ${request.agentId}`, error);
             const result = {
                 agentId: request.agentId,
                 action: request.action,
@@ -422,18 +421,18 @@ export class AgentLifecycleWorkflow {
      * DBOS automatically handles recovery, but this can be used for
      * monitoring and manual intervention if needed.
      */
-    static async recoverWorkflow(ctx, workflowUuid) {
-        ctx.logger.info(`Recovering workflow ${workflowUuid}`);
+    static async recoverWorkflow(workflowUuid) {
+        DBOS.logger.info(`Recovering workflow ${workflowUuid}`);
         // Query workflow status from DBOS system tables
-        const status = await ctx.query(`SELECT status, name FROM dbos_system.workflow_status
+        const status = await DBOS.query(`SELECT status, name FROM dbos_system.workflow_status
        WHERE workflow_uuid = $1`, [workflowUuid]);
         if (!status.rows.length) {
             return { recovered: false, status: 'not_found' };
         }
         const workflow = status.rows[0];
-        ctx.logger.info(`Found workflow in status: ${workflow.status}`);
+        DBOS.logger.info(`Found workflow in status: ${workflow.status}`);
         // Update recovery tracking
-        await ctx.query(`UPDATE dbos_system.workflow_status
+        await DBOS.query(`UPDATE dbos_system.workflow_status
        SET recovery_attempts = COALESCE(recovery_attempts, 0) + 1,
            updated_at = NOW()
        WHERE workflow_uuid = $1`, [workflowUuid]);
@@ -444,105 +443,105 @@ export class AgentLifecycleWorkflow {
     }
 }
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "validateProvisionRequest", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "storeAgentMetadata", null);
 __decorate([
-    Communicator(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "connectAgentChannels", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "startHeartbeatMonitoring", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, String, String, String]),
+    __metadata("design:paramtypes", [String, String, String, String]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "updateAgentStatus", null);
 __decorate([
-    Workflow(),
+    DBOS.workflow(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "provisionAgentWorkflow", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "createHeartbeatExecution", null);
 __decorate([
-    Communicator(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "executeHeartbeatTasks", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, String, Object, String]),
+    __metadata("design:paramtypes", [String, String, Object, String]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "updateHeartbeatExecution", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, String]),
+    __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "scheduleNextHeartbeat", null);
 __decorate([
-    Workflow(),
+    DBOS.workflow(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "heartbeatWorkflow", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "captureAgentState", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "storeStateCheckpoint", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, String, Object]),
+    __metadata("design:paramtypes", [String, String, Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "updatePauseResumeStatus", null);
 __decorate([
-    Step(),
+    DBOS.step(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "restoreAgentState", null);
 __decorate([
-    Workflow(),
+    DBOS.workflow(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "pauseResumeWorkflow", null);
 __decorate([
-    Workflow(),
+    DBOS.workflow(),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AgentLifecycleWorkflow, "recoverWorkflow", null);
 //# sourceMappingURL=agent-lifecycle-workflow.js.map

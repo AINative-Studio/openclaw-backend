@@ -9,7 +9,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from backend.models.agent_lifecycle import AgentSwarmInstance, AgentSwarmStatus as AgentStatus
+from backend.models.agent_swarm_lifecycle import AgentSwarmInstance, AgentSwarmStatus as AgentStatus
 from backend.services.agent_lifecycle_api_service import AgentLifecycleApiService
 
 logger = logging.getLogger(__name__)

@@ -10,6 +10,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
+from uuid import UUID
 import random
 import sys
 import os
@@ -18,13 +19,25 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'integrations'))
 
 from openclaw_bridge import OpenClawBridge as BaseOpenClawBridge
-from app.agents.orchestration.openclaw_bridge_protocol import (
+from backend.agents.orchestration.openclaw_bridge_protocol import (
     IOpenClawBridge,
     BridgeConnectionState,
     ConnectionError,
     SendError,
     SessionError
 )
+
+# Optional imports for conversation persistence
+try:
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from backend.services.conversation_service import ConversationService
+    from backend.integrations.zerodb_client import ZeroDBClient
+    PERSISTENCE_AVAILABLE = True
+except ImportError:
+    PERSISTENCE_AVAILABLE = False
+    AsyncSession = None
+    ConversationService = None
+    ZeroDBClient = None
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +58,8 @@ class ProductionOpenClawBridge:
         self,
         url: str,
         token: str,
+        db: Optional['AsyncSession'] = None,
+        zerodb_client: Optional['ZeroDBClient'] = None,
         max_retries: int = 3,
         initial_delay: float = 1.0,
         max_delay: float = 30.0
@@ -55,6 +70,8 @@ class ProductionOpenClawBridge:
         Args:
             url: OpenClaw Gateway WebSocket URL
             token: Authentication token
+            db: Optional async database session for conversation persistence
+            zerodb_client: Optional ZeroDB client for message storage
             max_retries: Maximum retry attempts
             initial_delay: Initial retry delay in seconds
             max_delay: Maximum retry delay in seconds
@@ -65,11 +82,24 @@ class ProductionOpenClawBridge:
         self._initial_delay = initial_delay
         self._max_delay = max_delay
 
+        # Conversation persistence (optional)
+        self._db = db
+        self._zerodb = zerodb_client
+        self._conversation_service = None
+
+        # Initialize ConversationService if both dependencies provided
+        if PERSISTENCE_AVAILABLE and db is not None and zerodb_client is not None:
+            self._conversation_service = ConversationService(db=db, zerodb_client=zerodb_client)
+            logger.info("ProductionOpenClawBridge initialized with conversation persistence enabled")
+        else:
+            logger.info("ProductionOpenClawBridge initialized without conversation persistence")
+
         logger.info(
             "ProductionOpenClawBridge initialized",
             extra={
                 "url": url,
-                "max_retries": max_retries
+                "max_retries": max_retries,
+                "persistence_enabled": self._conversation_service is not None
             }
         )
 
@@ -122,14 +152,22 @@ class ProductionOpenClawBridge:
         self,
         session_key: str,
         message: str,
+        agent_id: Optional[UUID] = None,
+        user_id: Optional[UUID] = None,
+        workspace_id: Optional[UUID] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Send message to agent with retry and validation
 
+        Optionally persists conversation to ZeroDB when agent_id, user_id, and workspace_id are provided.
+
         Args:
             session_key: Target session identifier
             message: Message content to send
+            agent_id: Optional agent UUID for conversation tracking
+            user_id: Optional user UUID for conversation tracking
+            workspace_id: Optional workspace UUID for conversation context
             metadata: Optional metadata for routing/tracking
 
         Returns:
@@ -140,6 +178,41 @@ class ProductionOpenClawBridge:
             SessionError: If session key is invalid
             SendError: If message delivery fails after retries
         """
+        # Step 1: Get or create conversation (if IDs provided)
+        conversation = None
+        if self._conversation_service and agent_id and user_id and workspace_id:
+            try:
+                conversation = await self._conversation_service.get_conversation_by_session_key(session_key)
+                if not conversation:
+                    conversation = await self._conversation_service.create_conversation(
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        user_id=user_id,
+                        openclaw_session_key=session_key
+                    )
+                    logger.info(f"Created new conversation {conversation.id} for session {session_key}")
+            except Exception as e:
+                # Graceful degradation - log error but continue
+                logger.warning(
+                    f"Failed to create/retrieve conversation: {e}",
+                    extra={"session_key": session_key, "error": str(e)}
+                )
+
+        # Step 2: Store user message in ZeroDB (if conversation exists)
+        if conversation:
+            try:
+                await self._conversation_service.add_message(
+                    conversation_id=conversation.id,
+                    role="user",
+                    content=message
+                )
+                logger.debug(f"Stored user message in conversation {conversation.id}")
+            except Exception as e:
+                # Graceful degradation - log error but continue
+                logger.warning(
+                    f"Failed to store user message: {e}",
+                    extra={"conversation_id": str(conversation.id), "error": str(e)}
+                )
         # Validate connection
         if not self.is_connected:
             raise ConnectionError("Bridge is not connected. Call connect() first.")
@@ -169,8 +242,36 @@ class ProductionOpenClawBridge:
                     "message_id": result.get("id", f"msg_{datetime.now(timezone.utc).timestamp()}"),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "session_key": session_key,
-                    "metadata": metadata or {}
+                    "metadata": metadata or {},
+                    "result": result  # Include full result for assistant response extraction
                 }
+
+                # Include conversation_id if conversation was tracked
+                if conversation:
+                    response["conversation_id"] = str(conversation.id)
+
+                # Step 4: Store assistant response in ZeroDB (if conversation exists and response has content)
+                if conversation and result.get("result") and result["result"].get("response"):
+                    try:
+                        assistant_metadata = {}
+                        if result["result"].get("model"):
+                            assistant_metadata["model"] = result["result"]["model"]
+                        if result["result"].get("tokens_used"):
+                            assistant_metadata["tokens_used"] = result["result"]["tokens_used"]
+
+                        await self._conversation_service.add_message(
+                            conversation_id=conversation.id,
+                            role="assistant",
+                            content=result["result"]["response"],
+                            metadata=assistant_metadata if assistant_metadata else None
+                        )
+                        logger.debug(f"Stored assistant response in conversation {conversation.id}")
+                    except Exception as e:
+                        # Graceful degradation - log error but continue
+                        logger.warning(
+                            f"Failed to store assistant response: {e}",
+                            extra={"conversation_id": str(conversation.id), "error": str(e)}
+                        )
 
                 logger.info(
                     "Message sent successfully",
@@ -295,3 +396,68 @@ class ProductionOpenClawBridge:
             return False
 
         return True
+
+    async def _load_conversation_context(
+        self,
+        conversation_id: UUID,
+        max_messages: int = 10
+    ) -> list:
+        """
+        Load recent conversation context for message handlers.
+
+        Retrieves the last N messages from a conversation to provide context
+        for agent responses. Used by message handlers to maintain conversation
+        continuity.
+
+        Args:
+            conversation_id: UUID of conversation to load context from
+            max_messages: Maximum number of recent messages to retrieve (default: 10)
+
+        Returns:
+            List of message dictionaries with role, content, timestamp.
+            Returns empty list if conversation service unavailable or on error
+            (graceful degradation).
+
+        Example:
+            context = await bridge._load_conversation_context(
+                conversation_id=UUID("..."),
+                max_messages=10
+            )
+            # Returns: [
+            #     {"id": "msg_1", "role": "user", "content": "Hello", "timestamp": "..."},
+            #     {"id": "msg_2", "role": "assistant", "content": "Hi!", "timestamp": "..."}
+            # ]
+        """
+        # Graceful degradation if conversation service not available
+        if not self._conversation_service:
+            logger.debug("ConversationService not available - returning empty context")
+            return []
+
+        try:
+            # Retrieve messages from ZeroDB via conversation service
+            messages = await self._conversation_service.get_messages(
+                conversation_id=conversation_id,
+                limit=max_messages,
+                offset=0
+            )
+
+            logger.debug(
+                f"Loaded {len(messages)} messages for conversation context",
+                extra={
+                    "conversation_id": str(conversation_id),
+                    "message_count": len(messages)
+                }
+            )
+
+            return messages
+
+        except Exception as e:
+            # Graceful degradation on error - log and return empty context
+            logger.warning(
+                f"Failed to load conversation context: {e}",
+                extra={
+                    "conversation_id": str(conversation_id),
+                    "error": str(e)
+                }
+            )
+            return []

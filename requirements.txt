@@ -1,29 +1,151 @@
 # OpenClaw Backend Requirements
+# Last Security Audit: 2026-03-09
+# Python: 3.14.2
+# All versions pinned for security and reproducibility
 
-# FastAPI and dependencies
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-pydantic>=2.5.0
-python-multipart>=0.0.6
+# ============================================================================
+# Core Web Framework
+# ============================================================================
+fastapi==0.135.1              # Web framework - current stable
+uvicorn[standard]==0.41.0     # ASGI server with performance extras
+starlette==0.52.1             # ASGI framework (fastapi dependency)
+pydantic==2.12.5              # Data validation - v2.x stable
+pydantic-core==2.41.5         # Pydantic validation engine (locked to pydantic compatibility)
+python-multipart==0.0.22      # Multipart form data parsing
 
+# ============================================================================
 # Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-httpx>=0.25.0
+# ============================================================================
+pytest==9.0.2                 # Test framework
+pytest-asyncio==1.3.0         # Async test support
+pytest-cov==7.0.0             # Coverage reporting
+httpx==0.28.1                 # HTTP client for testing and DBOS calls
+coverage[toml]==7.13.4        # Coverage measurement with TOML support
 
+# ============================================================================
 # Networking
-ipaddress>=1.0.23
+# ============================================================================
+ipaddress==1.0.23             # IP address manipulation (Python 3.3+ backport)
 
-# Logging and monitoring
-python-json-logger>=2.0.7
-prometheus_client>=0.20.0
-ddtrace>=2.14.0
+# ============================================================================
+# Logging and Monitoring
+# ============================================================================
+python-json-logger==4.0.0     # Structured JSON logging
+prometheus_client==0.24.1     # Prometheus metrics export
+ddtrace==4.5.2                # Datadog APM tracing
 
-# Database (for future DBOS integration)
-sqlalchemy>=2.0.0
-alembic>=1.12.0
+# ============================================================================
+# Database
+# ============================================================================
+sqlalchemy==2.0.48            # ORM - 2.0.x stable release
+alembic==1.18.4               # Database migrations
+Mako==1.3.10                  # Template engine for Alembic
 
-msgpack>=1.0.0
-cryptography>=40.0.0
-base58>=2.1.0
+# ============================================================================
+# Serialization & Encoding
+# ============================================================================
+msgpack==1.1.2                # Binary serialization for P2P messages
+base58==2.1.1                 # Base58 encoding for peer IDs
+
+# ============================================================================
+# Security & Cryptography
+# ============================================================================
+# SECURITY NOTE: ecdsa 0.19.1 has CVE-2024-23342 (Minerva timing attack)
+# - No fix available (maintainer considers it out-of-scope)
+# - Risk accepted for typical cloud deployments
+# - Transitive dependency via python-jose
+# - See docs/security/dependency-audit-2026-03-09.md
+cryptography==46.0.5          # Cryptographic primitives - CRITICAL, keep updated
+python-jose[cryptography]==3.5.0  # JWT tokens (brings in ecdsa via dependencies)
+passlib[bcrypt]==1.7.4        # Password hashing
+bcrypt==5.0.0                 # Bcrypt implementation for passlib
+
+# ============================================================================
+# Input Sanitization
+# ============================================================================
+bleach==6.3.0                 # HTML sanitization
+html5lib==1.1                 # HTML5 parsing for bleach
+
+# ============================================================================
+# Security Audit Tools (Development)
+# ============================================================================
+# These are for security auditing and should be run regularly
+# pip-audit --requirement requirements.txt
+# safety scan --json
+pip-audit==2.10.0             # Vulnerability scanner
+safety==3.7.0                 # CVE database checker
+
+# ============================================================================
+# Supporting Libraries
+# ============================================================================
+# These are transitive dependencies we explicitly pin for security
+anyio==4.12.1                 # Async I/O abstraction
+certifi==2026.2.25            # CA certificates bundle
+charset-normalizer==3.4.5     # Character encoding detection
+click==8.3.1                  # CLI framework
+h11==0.16.0                   # HTTP/1.1 protocol
+httpcore==1.0.9               # HTTP core primitives
+httptools==0.7.1              # HTTP parser (uvicorn performance)
+idna==3.11                    # Internationalized domain names
+iniconfig==2.3.0              # INI config parsing (pytest)
+jinja2==3.1.6                 # Template engine
+MarkupSafe==3.0.3             # Safe string handling for Jinja2
+packaging==26.0               # Version parsing and comparison
+pluggy==1.6.0                 # Plugin framework (pytest)
+pygments==2.19.2              # Syntax highlighting
+pyparsing==3.3.2              # Parser generator
+python-dotenv==1.2.2          # Environment variable loading
+pyyaml==6.0.3                 # YAML parsing (uvicorn)
+requests==2.32.5              # HTTP library
+rich==14.3.3                  # Terminal formatting (for dev tools)
+six==1.17.0                   # Python 2/3 compatibility (legacy dep)
+tomli==2.4.0                  # TOML parser (Python 3.11+ backport)
+typing-extensions==4.15.0     # Typing backports
+urllib3==2.6.3                # HTTP client library
+uvloop==0.22.1                # Fast event loop (uvicorn performance)
+watchfiles==1.1.1             # File watching (uvicorn auto-reload)
+websockets==16.0              # WebSocket protocol
+webencodings==0.5.1           # Character encoding (bleach)
+wrapt==2.1.2                  # Object proxy utilities (ddtrace)
+
+# ============================================================================
+# Indirect Security Dependencies
+# ============================================================================
+# These are pulled in by cryptography and security packages
+cffi==2.0.0                   # C Foreign Function Interface
+pycparser==3.0                # C parser for cffi
+pyasn1==0.6.2                 # ASN.1 parsing (cryptography)
+rsa==4.9.1                    # RSA implementation (python-jose)
+ecdsa==0.19.1                 # ECDSA implementation - HAS KNOWN CVE (see above)
+
+# ============================================================================
+# OpenTelemetry (Datadog Dependencies)
+# ============================================================================
+opentelemetry-api==1.40.0     # OpenTelemetry API (ddtrace)
+importlib-metadata==8.7.1     # Import metadata access
+zipp==3.23.0                  # ZIP file handling
+bytecode==0.17.0              # Python bytecode analysis (ddtrace)
+envier==0.6.1                 # Environment configuration
+
+# ============================================================================
+# Testing Support Libraries
+# ============================================================================
+annotated-types==0.7.0        # Type annotations
+annotated-doc==0.0.4          # Documentation annotations
+
+# ============================================================================
+# Version Pinning Notes
+# ============================================================================
+# 1. All versions use == for exact pinning (production stability)
+# 2. Security-critical packages reviewed quarterly
+# 3. Dependabot enabled for automated security updates
+# 4. Run `pip-audit` before each deployment
+# 5. See docs/security/dependency-audit-2026-03-09.md for full audit report
+#
+# Update Policy:
+# - CRITICAL vulnerabilities: Update within 24 hours
+# - HIGH vulnerabilities: Update within 7 days
+# - MEDIUM vulnerabilities: Update within 30 days
+# - Routine updates: Monthly security review
+#
+# Next Audit: 2026-06-09

@@ -420,6 +420,10 @@ class LeaseRevocationService:
             Dict with revocation statistics
         """
         try:
+            # Use fresh session query to avoid stale transaction state
+            self.db.expire_all()  # Expire all cached objects
+            self.db.rollback()    # Clear any pending transaction state
+
             total_leases = self.db.query(TaskLease).count()
             revoked_leases = self.db.query(TaskLease).filter(
                 TaskLease.is_revoked == 1
@@ -443,8 +447,30 @@ class LeaseRevocationService:
             return stats
 
         except SQLAlchemyError as e:
+            self.db.rollback()  # Ensure rollback on error
             logger.error(
                 "Database error retrieving revocation stats",
                 extra={"error": str(e)}
             )
-            raise
+            # Return degraded stats instead of raising
+            return {
+                "total_leases": 0,
+                "revoked_leases": 0,
+                "active_leases": 0,
+                "revocation_rate": 0.0,
+                "error": str(e)
+            }
+
+def get_lease_revocation_service() -> LeaseRevocationService:
+    """
+    Get lease revocation service instance with fresh database session
+
+    Creates a new database session for each call to avoid transaction
+    state issues. The caller is responsible for closing the session.
+
+    Returns:
+        LeaseRevocationService instance with new database session
+    """
+    from backend.db.base import SessionLocal
+    db_session = SessionLocal()
+    return LeaseRevocationService(db=db_session)

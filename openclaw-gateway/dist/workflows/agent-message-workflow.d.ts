@@ -4,20 +4,20 @@
  * DBOS durable workflow for routing agent messages with guaranteed delivery.
  * This workflow survives crashes and automatically recovers.
  */
-import { WorkflowContext, StepContext } from '@dbos-inc/dbos-sdk';
-export interface AgentMessage {
+interface AgentMessage {
     id: string;
     from: string;
     to: string;
     content: string;
-    timestamp: number;
+    timestamp?: number;
     metadata?: Record<string, unknown>;
 }
-export interface MessageRoutingResult {
+interface MessageDeliveryResult {
     messageId: string;
-    status: 'delivered' | 'pending' | 'failed';
+    status: 'delivered' | 'failed';
     deliveryAttempts: number;
     lastAttemptTime: number;
+    response?: string;
 }
 /**
  * Main workflow class for agent message routing
@@ -26,22 +26,24 @@ export declare class AgentMessageWorkflow {
     /**
      * Validate incoming message
      */
-    static validateMessage(ctx: StepContext, message: AgentMessage): Promise<boolean>;
+    static validateMessage(message: AgentMessage): Promise<boolean>;
     /**
      * Store message in database for durability
+     * Note: Using knex raw queries as DBOS.query() doesn't exist
      */
-    static storeMessage(ctx: StepContext, message: AgentMessage): Promise<void>;
+    static storeMessage(message: AgentMessage): Promise<void>;
     /**
      * Route message to target agent
      */
-    static routeMessage(ctx: StepContext, message: AgentMessage): Promise<MessageRoutingResult>;
+    static routeMessage(message: AgentMessage): Promise<MessageDeliveryResult>;
     /**
      * Main workflow: orchestrates message routing with durability
      */
-    static routeAgentMessage(ctx: WorkflowContext, message: AgentMessage): Promise<MessageRoutingResult>;
+    static routeAgentMessage(message: AgentMessage): Promise<MessageDeliveryResult>;
     /**
      * Recovery workflow: automatically resumes interrupted workflows
      */
-    static recoverWorkflow(ctx: WorkflowContext, workflowUuid: string): Promise<void>;
+    static recoverWorkflow(workflowUuid: string): Promise<void>;
 }
+export {};
 //# sourceMappingURL=agent-message-workflow.d.ts.map

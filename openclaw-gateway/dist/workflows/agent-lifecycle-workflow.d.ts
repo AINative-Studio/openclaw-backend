@@ -6,11 +6,7 @@
  *
  * Refs #1217
  */
-import { WorkflowContext, StepContext, CommunicatorContext } from '@dbos-inc/dbos-sdk';
-/**
- * Agent provisioning request
- */
-export interface AgentProvisionRequest {
+interface ProvisionRequest {
     agentId: string;
     name: string;
     persona?: string;
@@ -22,57 +18,15 @@ export interface AgentProvisionRequest {
     heartbeatChecklist?: string[];
     configuration?: Record<string, unknown>;
 }
-/**
- * Agent provisioning result
- */
-export interface AgentProvisionResult {
+interface HeartbeatRequest {
+    executionId: string;
     agentId: string;
-    status: 'provisioned' | 'failed';
-    sessionKey: string;
-    openclawAgentId?: string;
-    error?: string;
-    timestamp: number;
-}
-/**
- * Heartbeat execution request
- */
-export interface HeartbeatRequest {
-    agentId: string;
-    sessionKey: string;
     checklist: string[];
-    executionId: string;
 }
-/**
- * Heartbeat execution result
- */
-export interface HeartbeatResult {
-    executionId: string;
-    agentId: string;
-    status: 'completed' | 'failed' | 'skipped';
-    duration: number;
-    error?: string;
-    result?: Record<string, unknown>;
-    timestamp: number;
-}
-/**
- * Pause/resume request
- */
-export interface PauseResumeRequest {
+interface PauseResumeRequest {
     agentId: string;
     action: 'pause' | 'resume';
-    sessionKey: string;
     preserveState?: boolean;
-}
-/**
- * Pause/resume result
- */
-export interface PauseResumeResult {
-    agentId: string;
-    action: 'pause' | 'resume';
-    status: 'success' | 'failed';
-    state?: Record<string, unknown>;
-    error?: string;
-    timestamp: number;
 }
 /**
  * Agent Lifecycle Workflow Class
@@ -86,25 +40,25 @@ export declare class AgentLifecycleWorkflow {
     /**
      * Validate provisioning request
      */
-    static validateProvisionRequest(ctx: StepContext, request: AgentProvisionRequest): Promise<boolean>;
+    static validateProvisionRequest(request: ProvisionRequest): Promise<boolean>;
     /**
      * Store agent metadata in database
      */
-    static storeAgentMetadata(ctx: StepContext, request: AgentProvisionRequest): Promise<void>;
+    static storeAgentMetadata(request: ProvisionRequest): Promise<void>;
     /**
-     * Connect agent channels (communicator for external API calls)
+     * Connect agent channels (external API calls allowed in steps)
      */
-    static connectAgentChannels(ctx: CommunicatorContext, request: AgentProvisionRequest): Promise<{
+    static connectAgentChannels(request: ProvisionRequest): Promise<{
         openclawAgentId: string;
     }>;
     /**
      * Start heartbeat monitoring if enabled
      */
-    static startHeartbeatMonitoring(ctx: StepContext, request: AgentProvisionRequest): Promise<void>;
+    static startHeartbeatMonitoring(request: ProvisionRequest): Promise<void>;
     /**
-     * Update agent status to running
+     * Update agent status
      */
-    static updateAgentStatus(ctx: StepContext, agentId: string, status: string, openclawAgentId?: string, error?: string): Promise<void>;
+    static updateAgentStatus(agentId: string, status: string, openclawAgentId?: string, error?: string): Promise<void>;
     /**
      * Main provisioning workflow
      *
@@ -112,62 +66,116 @@ export declare class AgentLifecycleWorkflow {
      * If the process crashes mid-execution, DBOS will automatically resume
      * from the last completed step.
      */
-    static provisionAgentWorkflow(ctx: WorkflowContext, request: AgentProvisionRequest): Promise<AgentProvisionResult>;
+    static provisionAgentWorkflow(request: ProvisionRequest): Promise<{
+        agentId: string;
+        status: string;
+        sessionKey: string;
+        openclawAgentId: string;
+        timestamp: number;
+    } | {
+        agentId: string;
+        status: string;
+        sessionKey: string;
+        error: string;
+        timestamp: number;
+    }>;
     /**
      * Create heartbeat execution record
      */
-    static createHeartbeatExecution(ctx: StepContext, request: HeartbeatRequest): Promise<void>;
+    static createHeartbeatExecution(request: HeartbeatRequest): Promise<void>;
     /**
-     * Execute heartbeat tasks (communicator for external calls)
+     * Execute heartbeat tasks (external calls allowed)
      */
-    static executeHeartbeatTasks(ctx: CommunicatorContext, request: HeartbeatRequest): Promise<Record<string, unknown>>;
+    static executeHeartbeatTasks(request: HeartbeatRequest): Promise<{
+        tasksCompleted: number;
+        checklist: string[];
+        executionTime: number;
+    }>;
     /**
      * Update heartbeat execution status
      */
-    static updateHeartbeatExecution(ctx: StepContext, executionId: string, status: string, result?: Record<string, unknown>, error?: string): Promise<void>;
+    static updateHeartbeatExecution(executionId: string, status: string, result?: unknown, error?: string): Promise<void>;
     /**
      * Schedule next heartbeat
      */
-    static scheduleNextHeartbeat(ctx: StepContext, agentId: string, interval: string): Promise<void>;
+    static scheduleNextHeartbeat(agentId: string, interval: string): Promise<void>;
     /**
      * Main heartbeat workflow
      *
      * Executes agent heartbeat tasks with durability.
      * Auto-recovers from crashes and ensures heartbeat continuity.
      */
-    static heartbeatWorkflow(ctx: WorkflowContext, request: HeartbeatRequest): Promise<HeartbeatResult>;
+    static heartbeatWorkflow(request: HeartbeatRequest): Promise<{
+        executionId: string;
+        agentId: string;
+        status: string;
+        duration: number;
+        result: {
+            tasksCompleted: number;
+            checklist: string[];
+            executionTime: number;
+        };
+        timestamp: number;
+    } | {
+        executionId: string;
+        agentId: string;
+        status: string;
+        duration: number;
+        error: string;
+        timestamp: number;
+    }>;
     /**
      * Capture agent state for pause
      */
-    static captureAgentState(ctx: StepContext, agentId: string): Promise<Record<string, unknown>>;
+    static captureAgentState(agentId: string): Promise<{
+        configuration: any;
+        heartbeatEnabled: any;
+        heartbeatInterval: any;
+        nextHeartbeatAt: any;
+        previousStatus: any;
+        capturedAt: string;
+    }>;
     /**
      * Store agent state checkpoint
      */
-    static storeStateCheckpoint(ctx: StepContext, agentId: string, state: Record<string, unknown>): Promise<void>;
+    static storeStateCheckpoint(agentId: string, state: unknown): Promise<void>;
     /**
      * Update agent pause/resume status
      */
-    static updatePauseResumeStatus(ctx: StepContext, agentId: string, action: 'pause' | 'resume', state?: Record<string, unknown>): Promise<void>;
+    static updatePauseResumeStatus(agentId: string, action: string, state?: any): Promise<void>;
     /**
      * Restore agent state from checkpoint
      */
-    static restoreAgentState(ctx: StepContext, agentId: string): Promise<Record<string, unknown>>;
+    static restoreAgentState(agentId: string): Promise<any>;
     /**
      * Main pause/resume workflow
      *
      * Gracefully pauses or resumes agent with state preservation.
      * Uses DBOS checkpointing to ensure state consistency.
      */
-    static pauseResumeWorkflow(ctx: WorkflowContext, request: PauseResumeRequest): Promise<PauseResumeResult>;
+    static pauseResumeWorkflow(request: PauseResumeRequest): Promise<{
+        agentId: string;
+        action: "pause" | "resume";
+        status: string;
+        state: {};
+        timestamp: number;
+    } | {
+        agentId: string;
+        action: "pause" | "resume";
+        status: string;
+        error: string;
+        timestamp: number;
+    }>;
     /**
      * Recover workflow from crash
      *
      * DBOS automatically handles recovery, but this can be used for
      * monitoring and manual intervention if needed.
      */
-    static recoverWorkflow(ctx: WorkflowContext, workflowUuid: string): Promise<{
+    static recoverWorkflow(workflowUuid: string): Promise<{
         recovered: boolean;
-        status: string;
+        status: any;
     }>;
 }
+export {};
 //# sourceMappingURL=agent-lifecycle-workflow.d.ts.map

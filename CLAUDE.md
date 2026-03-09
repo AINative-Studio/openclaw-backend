@@ -1,3 +1,4 @@
+
 # OpenClaw Backend
 
 Backend infrastructure for AgentClaw — an autonomous multi-agent development platform by AINative Studio. Enables AI agent swarms orchestrated via WhatsApp to build full-stack applications from PRDs.
@@ -7,6 +8,7 @@ Backend infrastructure for AgentClaw — an autonomous multi-agent development p
 - **Python 3.x / FastAPI** — API framework with Pydantic v2 models
 - **SQLAlchemy 2.0 / Alembic** — ORM and migrations
 - **PyJWT / cryptography / msgpack / base58** — JWT tokens, Ed25519 signing, binary serialization, peer IDs
+- **bcrypt** — Password hashing for user authentication
 - **PostgreSQL** — Railway-hosted (port 6432 via PgBouncer, database `ainative_app`)
 - **SQLite** — Local dev/test database (fallback via `DATABASE_URL` env var) + persistent result buffering during partitions
 - **httpx** — Async HTTP client for DBOS health checks and result submission
@@ -39,6 +41,20 @@ self-signed certificate in certificate chain: (SELF_SIGNED_CERT_IN_CHAIN)
 ```
 
 **Solution**: Add `PGSSLMODE=disable` to `.env` (see `docs/DBOS_GATEWAY_SETUP_IMPROVEMENTS.md`)
+
+## Gateway Port Configuration (Issue #97 - FIXED)
+
+**CRITICAL**: Gateway HTTP server port MUST be **18789** in BOTH configuration files.
+
+**Port Configuration Files**:
+1. `openclaw-gateway/.env` — Sets `PORT=18789` (read by Express server)
+2. `openclaw-gateway/dbos-config.yaml` — Sets `runtimeConfig.port: 18789` (DBOS internal)
+
+**Validation**: Run `npm run validate` before starting gateway to check port consistency.
+
+**Startup**: Use `npm start` (automatically validates configuration before starting).
+
+**Root Cause**: DBOS SDK has its own internal port configuration in `dbos-config.yaml` separate from the Express HTTP server port. Both must match for proper operation.
 
 ## Directory Structure
 
@@ -75,26 +91,100 @@ tests/                    # ~690 pytest tests (unit, integration, networking, p2
 docs/                     # Architecture and implementation documentation
 ```
 
+## Authentication & Authorization (Issue #126 - IMPLEMENTED)
+
+**Status**: ✅ **ALL SENSITIVE ENDPOINTS PROTECTED**
+
+All API endpoints (except health, metrics, auth, and webhooks) require JWT Bearer token authentication using `get_current_active_user()` dependency.
+
+### Authentication Flow
+
+1. **Login**: `POST /auth/login` with email/password → returns `access_token` and `refresh_token`
+2. **Authenticated Requests**: Include `Authorization: Bearer <access_token>` header
+3. **Token Refresh**: `POST /auth/refresh` with refresh token → returns new access token
+4. **Token Expiration**: Access tokens expire after 24 hours (configurable)
+
+### JWT Token Structure
+
+- **Algorithm**: HS256
+- **Claims**: `sub` (user_id), `email`, `workspace_id`, `exp` (expiration)
+- **Secret**: Set via `SECRET_KEY` environment variable (REQUIRED in production)
+
+### Protected Endpoint Categories
+
+**Protected** (require authentication):
+- All agent lifecycle endpoints (`/agents/*`)
+- All conversation endpoints (`/conversations/*`)
+- All API key management (`/api/v1/api-keys/*`, `/api/v1/user-api-keys/*`)
+- All team management (`/team/*`)
+- All channel management (`/channels/*`)
+- All agent configuration endpoints (personality, templates, skills, etc.)
+
+**Public** (no authentication required):
+- Health check: `GET /health`
+- Metrics: `GET /metrics` (read-only operational data)
+- Authentication: `POST /auth/login`, `POST /auth/register`, `POST /auth/refresh`
+- Webhooks: `POST /zalo/webhook`, etc. (use service-specific auth)
+
+### Error Responses
+
+- **401 Unauthorized**: Missing/invalid token or expired token
+- **403 Forbidden**: Valid token but user account is inactive
+- **404 Not Found**: User referenced in token not found in database
+
+### Security Configuration
+
+```env
+SECRET_KEY=<strong-random-key>           # REQUIRED: JWT signing key
+ACCESS_TOKEN_EXPIRE_MINUTES=1440          # Optional: Default 24 hours
+REFRESH_TOKEN_EXPIRE_DAYS=7               # Optional: Default 7 days
+```
+
+**CRITICAL**: Never use the default `development-secret-key-change-in-production` in production.
+
+### Testing Authentication
+
+```bash
+# Login
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password"}'
+
+# Use token in protected request
+curl -X GET http://localhost:8000/agents \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Documentation**: See `docs/AUTHENTICATION_STATUS.md` for comprehensive implementation details.
+
 ## API Endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/openclaw/status` | OpenClaw connection status (optional `include_history`) |
-| GET | `/wireguard/health` | WireGuard health (optional `include_peers`, `interface`) |
-| GET | `/wireguard/quality` | Network quality metrics |
-| POST | `/wireguard/provision` | Provision new WireGuard peer |
-| GET | `/wireguard/peers` | List all provisioned peers |
-| GET | `/wireguard/peers/{node_id}` | Get specific peer config |
-| DELETE | `/wireguard/peers/{node_id}` | Remove provisioned peer |
-| GET | `/wireguard/pool/stats` | IP pool statistics |
-| GET | `/metrics` | Prometheus metrics export (E8-S1) |
-| GET | `/swarm/health` | Swarm health snapshot (E8-S2) |
-| GET | `/swarm/timeline` | Task execution timeline events (E8-S3) |
-| GET | `/swarm/alerts/thresholds` | Alert threshold configuration (E8-S4) |
-| PUT | `/swarm/alerts/thresholds` | Update alert thresholds (E8-S4) |
-| GET | `/swarm/monitoring/status` | Monitoring infrastructure health (E8-S5) |
+| Method | Path | Purpose | Auth Required |
+|--------|------|---------|---------------|
+| GET | `/openclaw/status` | OpenClaw connection status (optional `include_history`) | Yes |
+| GET | `/wireguard/health` | WireGuard health (optional `include_peers`, `interface`) | Yes |
+| GET | `/wireguard/quality` | Network quality metrics | Yes |
+| POST | `/wireguard/provision` | Provision new WireGuard peer | Yes |
+| GET | `/wireguard/peers` | List all provisioned peers | Yes |
+| GET | `/wireguard/peers/{node_id}` | Get specific peer config | Yes |
+| DELETE | `/wireguard/peers/{node_id}` | Remove provisioned peer | Yes |
+| GET | `/wireguard/pool/stats` | IP pool statistics | Yes |
+| GET | `/metrics` | Prometheus metrics export (E8-S1) | **No** (public) |
+| GET | `/swarm/health` | Swarm health snapshot (E8-S2) | Yes |
+| GET | `/swarm/timeline` | Task execution timeline events (E8-S3) | Yes |
+| GET | `/swarm/alerts/thresholds` | Alert threshold configuration (E8-S4) | Yes |
+| PUT | `/swarm/alerts/thresholds` | Update alert thresholds (E8-S4) | Yes |
+| GET | `/swarm/monitoring/status` | Monitoring infrastructure health (E8-S5) | Yes |
+| POST | `/auth/login` | User login | **No** (public) |
+| POST | `/auth/register` | User registration | **No** (public) |
+| POST | `/auth/refresh` | Refresh access token | **No** (public) |
+| GET | `/auth/me` | Get current user info | Yes |
+| GET | `/agents` | List agents | Yes |
+| POST | `/agents` | Create agent | Yes |
+| GET | `/conversations` | List conversations | Yes |
+| POST | `/conversations` | Create conversation | Yes |
 
-Gateway (port 18789): `GET /health`, `GET /workflows/:uuid`, `POST /messages`, `WS /`
+Gateway (port 18789): `GET /health` (public), `GET /workflows/:uuid` (protected), `POST /messages` (protected), `WS /` (protected)
 
 ## Key Data Models
 
@@ -244,6 +334,110 @@ Several integration tests create file-based SQLite DBs (`test_task_requeue.db`, 
 - **Configurable health thresholds**: AlertThresholdService externalizes 4 hardcoded thresholds from SwarmHealthService; defaults match original values for zero behavioral change
 - **Monitoring facade with fault isolation**: MonitoringIntegrationService wraps 3 monitoring singletons; each `on_*()` method uses separate try/except blocks so timeline failure doesn't prevent metrics recording
 - **Conditional endpoint imports**: All `/swarm/*` endpoints use `try/except` import with `*_AVAILABLE` flag; return 503 if the backing service is unavailable
+
+## Security - IDOR Prevention (Issue #130 - HIGH PRIORITY)
+
+**CRITICAL**: All endpoints that accept resource IDs MUST verify authorization to prevent Insecure Direct Object References (IDOR) vulnerabilities.
+
+### Authorization Framework
+
+**Service**: `backend/security/authorization_service.py`
+- `AuthorizationService` class with workspace/ownership validation
+- `verify_conversation_access(conversation, user, require_ownership=True)`
+- `verify_agent_access(agent, user, require_ownership=False)`
+- `verify_workspace_access(workspace_id, user, resource_type="resource")`
+- `verify_user_api_key_access(user_api_key, user)`
+- `verify_swarm_access(swarm, user, require_ownership=False)`
+- `enforce_workspace_filter(requested_workspace_id, user) -> UUID`
+- `enforce_user_filter(requested_user_id, user, allow_all_workspace=False) -> Optional[UUID]`
+
+**Exceptions**:
+- `WorkspaceAccessDeniedError(403)` - Resource in different workspace
+- `OwnershipDeniedError(403)` - User doesn't own resource
+- `InsufficientPermissionsError(403)` - Lacks required permissions
+
+### Quick Reference
+
+**GET single resource**: Verify after fetch
+```python
+async def get_resource(
+    resource_id: UUID,
+    current_user: User = Depends(get_current_active_user),  # ✅ Required
+    db: Session = Depends(get_db)
+):
+    resource = await service.get_resource(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404)
+    verify_resource_access(resource, current_user, require_ownership=True)  # ✅ IDOR check
+    return resource
+```
+
+**GET list**: Enforce workspace filter
+```python
+async def list_resources(
+    workspace_id: Optional[UUID] = Query(None),
+    current_user: User = Depends(get_current_active_user),  # ✅ Required
+    service = Depends(get_service)
+):
+    auth_service = AuthorizationService(db)
+    enforced_workspace_id = auth_service.enforce_workspace_filter(workspace_id, current_user)  # ✅ Enforce
+    return await service.list_resources(workspace_id=enforced_workspace_id)
+```
+
+**POST create**: Override user_id
+```python
+async def create_resource(
+    request: CreateRequest,
+    current_user: User = Depends(get_current_active_user),  # ✅ Required
+    service = Depends(get_service)
+):
+    auth_service = AuthorizationService(db)
+    auth_service.verify_workspace_access(request.workspace_id, current_user)  # ✅ Verify workspace
+    return await service.create_resource(
+        workspace_id=request.workspace_id,
+        user_id=current_user.id  # ✅ Override with authenticated user
+    )
+```
+
+**PUT/PATCH/DELETE**: Require ownership
+```python
+async def delete_resource(
+    resource_id: UUID,
+    current_user: User = Depends(get_current_active_user),  # ✅ Required
+    service = Depends(get_service)
+):
+    resource = await service.get_resource(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404)
+    verify_resource_access(resource, current_user, require_ownership=True)  # ✅ Require ownership
+    await service.delete_resource(resource_id)
+    return {"status": "deleted"}
+```
+
+### Protected Endpoints (Issue #130)
+
+**✅ Fully Protected**:
+- `/conversations/*` - All 9 endpoints with workspace/ownership checks
+- `/agents/*` - Partially protected (list, get, create, provision with ownership verification)
+
+**⚠️ Needs Protection** (apply patterns from `docs/IDOR_PREVENTION.md`):
+- `/api-keys/*` - System API keys (admin-only, RBAC not yet implemented)
+- `/user-api-keys/*` - Workspace-scoped API keys
+- `/swarms/*` - Agent swarm lifecycle operations
+- `/agents/{agent_id}/pause|resume|update|delete` - Agent mutation endpoints
+- `/channels/*` - Channel configuration endpoints
+
+**Documentation**: Comprehensive guide at `docs/IDOR_PREVENTION.md` with patterns, tests, and checklist
+
+**Tests**: 17 unit/integration tests in `tests/test_idor_prevention.py` verifying workspace isolation and ownership
+
+### Security Best Practices
+
+1. **Always require authentication**: Every endpoint MUST have `current_user: User = Depends(get_current_active_user)`
+2. **Verify before mutate**: Fetch resource and check ownership BEFORE performing mutations
+3. **Override user-provided IDs**: Never trust `user_id` or `workspace_id` from request body—always use authenticated user's values
+4. **Enforce filtering**: Use `enforce_workspace_filter()` on list endpoints to prevent enumeration
+5. **Return 403 for authorization failures**: Don't leak existence with 404—use 403 for authorization denials
 
 ## Known Issues
 

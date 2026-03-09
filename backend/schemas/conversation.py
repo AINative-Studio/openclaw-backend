@@ -2,12 +2,16 @@
 Pydantic schemas for Conversation API (Issue #108)
 
 Request/response models for conversation management and message retrieval.
+
+Security: Issue #131 - Comprehensive input validation and XSS prevention
 """
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from uuid import UUID
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
+import re
+from backend.validators import sanitize_html, validate_safe_json_metadata
 
 
 class ConversationResponse(BaseModel):
@@ -37,13 +41,23 @@ class ConversationResponse(BaseModel):
     workspace_id: UUID
     agent_swarm_instance_id: Optional[UUID] = None  # Nullable as per Issue #103
     user_id: UUID  # Required as per Issue #103
-    channel: str  # Multi-channel support (whatsapp, telegram, slack, etc.)
-    channel_conversation_id: str  # External conversation ID
-    title: Optional[str] = None
+    channel: Literal["whatsapp", "telegram", "slack", "email", "zalo", "discord"] = Field(
+        ...,
+        description="Channel type (enforced enum for security)"
+    )
+    channel_conversation_id: str = Field(
+        ...,
+        max_length=255,
+        description="External conversation ID"
+    )
+    title: Optional[str] = Field(None, max_length=500)
     created_at: datetime
     updated_at: Optional[datetime] = None
     archived_at: Optional[datetime] = None
-    status: str  # ACTIVE, ARCHIVED, DELETED
+    status: Literal["ACTIVE", "ARCHIVED", "DELETED"] = Field(
+        ...,
+        description="Conversation status (enforced enum)"
+    )
     conversation_metadata: dict = Field(default_factory=dict)  # Replaces old metadata pattern
 
 
@@ -129,7 +143,16 @@ class MessageListResponse(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    """Request schema for semantic search."""
+    """
+    Request schema for semantic search with SQL injection protection (Issue #128).
+
+    Security Features:
+        - Maximum query length of 200 characters
+        - Blocks dangerous SQL keywords (UNION, SELECT, INSERT, etc.)
+        - Blocks SQL comment sequences (--, /*, */)
+        - Blocks semicolons to prevent query chaining
+        - Strips leading/trailing whitespace
+    """
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -140,8 +163,80 @@ class SearchRequest(BaseModel):
         }
     )
 
-    query: str = Field(..., min_length=1, description="Search query string")
-    limit: Optional[int] = Field(5, ge=1, le=50, description="Maximum number of results")
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Search query string (max 200 chars, SQL keywords blocked)"
+    )
+    limit: Optional[int] = Field(
+        5,
+        ge=1,
+        le=50,
+        description="Maximum number of results"
+    )
+
+    @field_validator('query')
+    @classmethod
+    def validate_query_safety(cls, v: str) -> str:
+        """
+        Validate search query to prevent SQL injection attacks (Issue #128).
+
+        Blocks:
+            - SQL keywords: UNION, SELECT, INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, EXEC, EXECUTE
+            - SQL comment sequences: --, /*, */
+            - Semicolons (query chaining)
+            - Control characters
+
+        Args:
+            v: Raw query string
+
+        Returns:
+            Sanitized query string (stripped whitespace)
+
+        Raises:
+            ValueError: If query contains forbidden SQL keywords or patterns
+        """
+        # Strip leading/trailing whitespace
+        v = v.strip()
+
+        # Check for dangerous SQL keywords (case-insensitive)
+        dangerous_keywords = [
+            'UNION', 'SELECT', 'INSERT', 'UPDATE', 'DELETE',
+            'DROP', 'CREATE', 'ALTER', 'EXEC', 'EXECUTE',
+            'SCRIPT', 'JAVASCRIPT', 'EVAL', 'EXPRESSION'
+        ]
+
+        query_upper = v.upper()
+        for keyword in dangerous_keywords:
+            if keyword in query_upper:
+                raise ValueError(
+                    f"Query contains forbidden SQL keyword: {keyword}. "
+                    f"Please use plain text search terms only."
+                )
+
+        # Block SQL comment sequences
+        if '--' in v or '/*' in v or '*/' in v:
+            raise ValueError(
+                "Query contains SQL comment sequences (-- or /* */). "
+                "Please use plain text search terms only."
+            )
+
+        # Block semicolons (query chaining)
+        if ';' in v:
+            raise ValueError(
+                "Query contains semicolon which is not allowed. "
+                "Please use plain text search terms only."
+            )
+
+        # Block null bytes and control characters (except newline, tab, space)
+        if re.search(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', v):
+            raise ValueError(
+                "Query contains invalid control characters. "
+                "Please use plain text search terms only."
+            )
+
+        return v
 
 
 class SearchResultsResponse(BaseModel):
@@ -187,7 +282,11 @@ class CreateConversationRequest(BaseModel):
 
 
 class AddMessageRequest(BaseModel):
-    """Request schema for adding a message to a conversation."""
+    """
+    Request schema for adding a message to a conversation.
+
+    Security: Issue #131 - Sanitizes HTML/XSS from content, validates metadata depth
+    """
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -199,9 +298,40 @@ class AddMessageRequest(BaseModel):
         }
     )
 
-    role: str = Field(..., description="Message role (user, assistant, system)")
-    content: str = Field(..., min_length=1, description="Message content")
-    metadata: dict = Field(default_factory=dict, description="Optional message metadata")
+    role: Literal["user", "assistant", "system"] = Field(
+        ...,
+        description="Message role (enforced enum for security)"
+    )
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=50000,
+        description="Message content (XSS sanitized)"
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description="Optional message metadata (validated depth/size)"
+    )
+
+    @field_validator('content')
+    @classmethod
+    def sanitize_content(cls, v: str) -> str:
+        """Sanitize message content to prevent XSS attacks (Issue #131)."""
+        return sanitize_html(v)
+
+    @field_validator('metadata')
+    @classmethod
+    def validate_metadata(cls, v: dict) -> dict:
+        """
+        Validate metadata structure to prevent DoS attacks (Issue #131).
+
+        Enforces:
+            - Max depth: 3 levels
+            - Max keys: 50 total
+            - Max string length: 1000 chars
+            - No dangerous keys (__proto__, eval, etc.)
+        """
+        return validate_safe_json_metadata(v, max_depth=3, max_keys=50, max_value_length=1000)
 
 
 class ConversationContextResponse(BaseModel):

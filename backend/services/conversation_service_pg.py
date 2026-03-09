@@ -262,23 +262,36 @@ class ConversationServicePG:
         limit: int = 5
     ) -> dict:
         """
-        Search for messages in a conversation.
+        Search for messages in a conversation using safe parameterized queries.
+
+        SECURITY: Uses SQLAlchemy's contains() method with proper escaping to prevent
+        SQL injection attacks. Special SQL wildcards (%, _) are escaped before use.
 
         Note: This is a simple text search. Full semantic search would require ZeroDB.
 
         Args:
             conversation_id: Conversation UUID
-            query: Search query string
+            query: Search query string (sanitized to prevent SQL injection)
             limit: Maximum results
 
         Returns:
             Dict with search results
+
+        Security:
+            - SQL wildcards (%, _) are escaped to prevent pattern injection
+            - Uses SQLAlchemy's parameterized queries (prevents SQL injection)
+            - Query string validated at schema level for dangerous keywords
         """
-        # Simple text search (case-insensitive LIKE)
+        # SECURITY FIX (Issue #128): Escape SQL wildcards to prevent pattern injection
+        # This ensures '%' and '_' in user input are treated as literal characters
+        query_sanitized = query.replace("%", "\\%").replace("_", "\\_")
+
+        # SECURITY FIX (Issue #128): Use SQLAlchemy's safe contains() method with func.lower()
+        # This generates a parameterized query that prevents SQL injection
         stmt = (
             select(Message)
             .where(Message.conversation_id == conversation_id)
-            .where(Message.content.ilike(f"%{query}%"))
+            .where(func.lower(Message.content).contains(func.lower(query_sanitized)))
             .order_by(desc(Message.created_at))
             .limit(limit)
         )
