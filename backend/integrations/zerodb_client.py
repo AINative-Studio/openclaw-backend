@@ -525,7 +525,7 @@ class ZeroDBClient:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    f"{self.api_url}/public/{proj_id}/database/tables/{table_name}/query",
+                    f"{self.api_url}/v1/public/{proj_id}/database/tables/{table_name}/query",
                     headers=self.headers,
                     json={
                         "filter": filter_query,
@@ -582,9 +582,9 @@ class ZeroDBClient:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    f"{self.api_url}/public/{proj_id}/database/tables/{table_name}/rows",
+                    f"{self.api_url}/v1/public/{proj_id}/database/tables/{table_name}/rows",
                     headers=self.headers,
-                    json={"rows": rows}
+                    json={"row_data": rows[0]} if len(rows) == 1 else {"rows": rows}
                 )
                 response.raise_for_status()
                 return response.json()
@@ -634,12 +634,12 @@ class ZeroDBClient:
 
         async with httpx.AsyncClient() as client:
             try:
-                response = await client.patch(
-                    f"{self.api_url}/public/{proj_id}/database/tables/{table_name}/rows",
+                response = await client.put(
+                    f"{self.api_url}/v1/public/{proj_id}/database/tables/{table_name}/rows/bulk",
                     headers=self.headers,
                     json={
                         "filter": filter_query,
-                        "update": update_data
+                        "update": {"$set": update_data}
                     }
                 )
                 response.raise_for_status()
@@ -695,7 +695,7 @@ class ZeroDBClient:
             try:
                 response = await client.request(
                     method="DELETE",
-                    url=f"{self.api_url}/public/{proj_id}/database/tables/{table_name}/rows",
+                    url=f"{self.api_url}/v1/public/{proj_id}/database/tables/{table_name}/rows/bulk",
                     headers=self.headers,
                     json={"filter": filter_query}
                 )

@@ -123,14 +123,8 @@ class ZeroDBCacheService:
         now = int(datetime.now(timezone.utc).timestamp())
 
         try:
-            # Query for key that hasn't expired
-            filter_query = {
-                "key": {"$eq": key},
-                "$or": [
-                    {"expires_at": {"$eq": None}},  # No expiration
-                    {"expires_at": {"$gt": now}}    # Not yet expired
-                ]
-            }
+            # Query for key
+            filter_query = {"key": {"$eq": key}}
 
             result = await self.client.query_rows(
                 table_name=self.TABLE_NAME,
@@ -138,11 +132,24 @@ class ZeroDBCacheService:
                 project_id=self.project_id
             )
 
-            rows = result.get("rows", [])
+            # Result is a dict with 'data' key containing list of rows
+            data_list = result.get("data", [])
 
-            if rows:
+            if data_list:
+                # Extract row_data from response
+                row_data = data_list[0].get("row_data", {})
+
+                # Check if expired
+                expires_at = row_data.get("expires_at")
+                if expires_at is not None and expires_at < now:
+                    # Expired - delete it
+                    await self.delete(key)
+                    self._stats["misses"] += 1
+                    logger.debug(f"Cache MISS for key '{key}' (expired)")
+                    return None
+
                 self._stats["hits"] += 1
-                value = rows[0].get("value")
+                value = row_data.get("value")
                 logger.debug(f"Cache HIT for key '{key}'")
                 return value
             else:
@@ -220,11 +227,13 @@ class ZeroDBCacheService:
                 project_id=self.project_id
             )
 
-            rows = result.get("rows", [])
+            # Result is a dict with 'data' key containing list of rows
+            data_list = result.get("data", [])
 
-            if rows:
+            if data_list:
                 # Increment existing counter
-                current_value = rows[0].get("counter", 0)
+                row_data = data_list[0].get("row_data", {})
+                current_value = row_data.get("counter", 0)
                 new_value = current_value + amount
 
                 await self.client.update_rows(
@@ -304,7 +313,9 @@ class ZeroDBCacheService:
                 project_id=self.project_id
             )
 
-            total_keys = len(result.get("rows", []))
+            # Result is a dict with 'data' key containing list of rows
+            data_list = result.get("data", [])
+            total_keys = len(data_list)
 
             # Calculate hit rate
             total_requests = self._stats["hits"] + self._stats["misses"]

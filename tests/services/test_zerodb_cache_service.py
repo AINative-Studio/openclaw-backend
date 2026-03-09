@@ -101,6 +101,9 @@ class TestZeroDBCacheService:
 
         cache = ZeroDBCacheService()
 
+        # Clean up any existing counter from previous test runs
+        await cache.delete("counter_key")
+
         # First increment creates counter
         count = await cache.increment("counter_key")
         assert count == 1
