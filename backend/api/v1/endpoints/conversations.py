@@ -181,9 +181,8 @@ async def get_conversation_messages(
         offset=offset
     )
 
-    # Get conversation to retrieve total message count
-    conversation = await service.get_conversation(conversation_id)
-    total = conversation.message_count if conversation else len(messages)
+    # Get total message count (message_count field removed in Issue #103 migration)
+    total = await service.get_message_count(conversation_id)
 
     return MessageListResponse(
         messages=messages,

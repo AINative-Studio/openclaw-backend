@@ -20,9 +20,9 @@ from backend.db.base_class import Base
 
 class ConversationStatus(str, Enum):
     """Conversation status enumeration"""
-    ACTIVE = "active"
-    ARCHIVED = "archived"
-    DELETED = "deleted"
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+    DELETED = "DELETED"
 
 
 class Conversation(Base):

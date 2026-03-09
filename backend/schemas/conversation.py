@@ -11,7 +11,7 @@ from typing import Optional, List
 
 
 class ConversationResponse(BaseModel):
-    """Response schema for a single conversation."""
+    """Response schema for a single conversation (Issue #103 multi-channel support)."""
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -19,26 +19,32 @@ class ConversationResponse(BaseModel):
             "example": {
                 "id": "123e4567-e89b-12d3-a456-426614174000",
                 "workspace_id": "789e4567-e89b-12d3-a456-426614174111",
-                "agent_id": "456e4567-e89b-12d3-a456-426614174222",
+                "agent_swarm_instance_id": "456e4567-e89b-12d3-a456-426614174222",
                 "user_id": "987e4567-e89b-12d3-a456-426614174333",
-                "openclaw_session_key": "session_abc123",
-                "started_at": "2024-01-15T10:00:00Z",
-                "last_message_at": "2024-01-15T10:30:00Z",
-                "message_count": 5,
-                "status": "active"
+                "channel": "whatsapp",
+                "channel_conversation_id": "whatsapp_123456",
+                "title": "Customer Support Chat",
+                "created_at": "2024-01-15T10:00:00Z",
+                "updated_at": "2024-01-15T10:30:00Z",
+                "archived_at": None,
+                "status": "ACTIVE",
+                "conversation_metadata": {}
             }
         }
     )
 
     id: UUID
     workspace_id: UUID
-    agent_id: UUID
-    user_id: Optional[UUID] = None
-    openclaw_session_key: Optional[str] = None
-    started_at: datetime
-    last_message_at: Optional[datetime] = None
-    message_count: int
-    status: str
+    agent_swarm_instance_id: Optional[UUID] = None  # Nullable as per Issue #103
+    user_id: UUID  # Required as per Issue #103
+    channel: str  # Multi-channel support (whatsapp, telegram, slack, etc.)
+    channel_conversation_id: str  # External conversation ID
+    title: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    status: str  # ACTIVE, ARCHIVED, DELETED
+    conversation_metadata: dict = Field(default_factory=dict)  # Replaces old metadata pattern
 
 
 class ConversationListResponse(BaseModel):
