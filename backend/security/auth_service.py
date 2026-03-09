@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import os
+import httpx
 
 from backend.models.user import User
 from backend.db.base import get_db, get_async_db
@@ -44,6 +45,9 @@ if not SECRET_KEY:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+# AINative API Configuration
+AINATIVE_API_URL = os.getenv("AINATIVE_API_URL", "https://api.ainative.studio")
 
 
 class AuthService:
@@ -159,9 +163,45 @@ class AuthService:
             )
 
     @staticmethod
+    async def _authenticate_with_ainative(email: str, password: str) -> Optional[dict]:
+        """
+        Authenticate user with AINative API
+
+        Args:
+            email: User email
+            password: Plain text password
+
+        Returns:
+            User data dictionary if successful, None otherwise
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{AINATIVE_API_URL}/v1/public/auth/login",
+                    data={"username": email, "password": password},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "email": email,
+                        "full_name": data.get("user", {}).get("fullName", email.split("@")[0]),
+                        "is_active": True
+                    }
+        except Exception:
+            # Silently fail and fall back to local authentication
+            pass
+
+        return None
+
+    @staticmethod
     async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
         """
         Authenticate a user by email and password
+
+        Tries AINative API first, then falls back to local database authentication.
+        Auto-creates user if AINative authentication succeeds but user doesn't exist locally.
 
         Args:
             db: Async database session
@@ -171,6 +211,29 @@ class AuthService:
         Returns:
             User object if authentication successful, None otherwise
         """
+        # Try AINative API authentication first
+        ainative_data = await AuthService._authenticate_with_ainative(email, password)
+
+        if ainative_data:
+            # AINative authentication successful - check if user exists locally
+            result = await db.execute(select(User).where(User.email == email))
+            user = result.scalars().first()
+
+            if not user:
+                # Auto-create user from AINative authentication
+                user = User(
+                    email=ainative_data["email"],
+                    full_name=ainative_data["full_name"],
+                    is_active=True,
+                    password_hash=None  # No local password for AINative users
+                )
+                db.add(user)
+                await db.commit()
+                await db.refresh(user)
+
+            return user if user.is_active else None
+
+        # Fall back to local database authentication
         result = await db.execute(select(User).where(User.email == email))
         user = result.scalars().first()
 

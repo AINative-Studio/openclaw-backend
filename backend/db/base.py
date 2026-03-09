@@ -90,6 +90,64 @@ async def get_async_db():
         yield session
 
 
+def get_async_pool_stats() -> dict:
+    """
+    Get async connection pool statistics for monitoring
+
+    Returns:
+        Dictionary with pool metrics:
+        - size: Current pool size
+        - checked_in: Available connections
+        - checked_out: In-use connections
+        - overflow: Overflow connections beyond pool size
+        - utilization_percent: Pool utilization percentage
+    """
+    pool = async_engine.pool
+    size = pool.size()
+    checked_out = pool.checkedout()
+    checked_in = size - checked_out
+    overflow = pool.overflow()
+
+    utilization = (checked_out / size * 100) if size > 0 else 0
+
+    return {
+        "size": size,
+        "checked_in": checked_in,
+        "checked_out": checked_out,
+        "overflow": overflow,
+        "utilization_percent": round(utilization, 2)
+    }
+
+
+def get_sync_pool_stats() -> dict:
+    """
+    Get sync connection pool statistics for monitoring
+
+    Returns:
+        Dictionary with pool metrics:
+        - size: Current pool size
+        - checked_in: Available connections
+        - checked_out: In-use connections
+        - overflow: Overflow connections beyond pool size
+        - utilization_percent: Pool utilization percentage
+    """
+    pool = engine.pool
+    size = pool.size()
+    checked_out = pool.checkedout()
+    checked_in = size - checked_out
+    overflow = pool.overflow()
+
+    utilization = (checked_out / size * 100) if size > 0 else 0
+
+    return {
+        "size": size,
+        "checked_in": checked_in,
+        "checked_out": checked_out,
+        "overflow": overflow,
+        "utilization_percent": round(utilization, 2)
+    }
+
+
 def init_db() -> None:
     """
     Initialize database by creating all tables

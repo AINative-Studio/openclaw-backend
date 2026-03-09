@@ -5,10 +5,25 @@ Registers all API routers and initializes the database.
 """
 
 import os
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Configure log sanitization BEFORE any other imports
+from backend.utils.log_sanitization import SanitizingFilter
+
+# Apply sanitizing filter to root logger
+root_logger = logging.getLogger()
+for handler in root_logger.handlers:
+    handler.addFilter(SanitizingFilter())
+
+# Also apply to uvicorn loggers
+for logger_name in ['uvicorn', 'uvicorn.access', 'uvicorn.error', 'fastapi']:
+    logger = logging.getLogger(logger_name)
+    for handler in logger.handlers:
+        handler.addFilter(SanitizingFilter())
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -302,6 +317,12 @@ def _register_routers() -> None:
         app.include_router(openclaw_channels_router, prefix=prefix)
     except Exception as e:
         print(f"Warning: openclaw_channels router not loaded: {e}")
+
+    try:
+        from backend.api.v1.endpoints.db_health import router as db_health_router
+        app.include_router(db_health_router, prefix=prefix)
+    except Exception as e:
+        print(f"Warning: db_health router not loaded: {e}")
 
 
     # Legacy compatibility routes (DISABLED - causing redirect loop)
